@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>DC Collection Tool</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 420px;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      font-size: 13px;
+      background: #f0f2f5;
+      color: #2c2c2c;
+    }
+
+    /* ─── Header ─── */
+    .header {
+      background: #1a237e;
+      color: #fff;
+      padding: 9px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      letter-spacing: 0.2px;
+    }
+    .header-phase {
+      font-size: 10px;
+      font-weight: 400;
+      background: rgba(255,255,255,0.18);
+      border-radius: 10px;
+      padding: 2px 8px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ─── Tool Tabs ─── */
+    .tool-tabs {
+      display: flex;
+      gap: 5px;
+      padding: 8px 10px;
+      background: #e8eaf6;
+      border-bottom: 1px solid #c5cae9;
+      overflow-x: auto;
+    }
+    .tool-tab {
+      padding: 5px 13px;
+      border-radius: 20px;
+      border: 1.5px solid transparent;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      background: transparent;
+      color: #5c6bc0;
+      transition: background 0.15s;
+    }
+    .tool-tab.active {
+      background: #3949ab;
+      color: #fff;
+      border-color: #3949ab;
+    }
+    .tool-tab:not(.active):hover { background: #d0d4ef; }
+
+    /* ─── State screens ─── */
+    .state-screen {
+      padding: 30px 16px;
+      text-align: center;
+    }
+    .state-wrong { color: #b71c1c; font-size: 13px; line-height: 1.6; }
+    .state-wrong small { color: #9e9e9e; font-size: 11px; }
+    .state-error { color: #b71c1c; font-size: 12px; line-height: 1.6; }
+    .spinner {
+      display: inline-block;
+      width: 24px; height: 24px;
+      border: 3px solid #c5cae9;
+      border-top-color: #3949ab;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      margin-bottom: 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { color: #5c6bc0; font-size: 13px; }
+
+    /* ─── Customer bar ─── */
+    .customer-bar {
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 8px 12px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 2px;
+    }
+    .customer-info { flex: 1; min-width: 0; }
+    .customer-name {
+      font-weight: 700;
+      font-size: 13px;
+      color: #1a237e;
+      margin-bottom: 2px;
+    }
+    .customer-ids { font-size: 11px; color: #555; }
+    .customer-agent { font-size: 11px; color: #9e9e9e; margin-top: 2px; }
+    .id-sep { margin: 0 4px; color: #ccc; }
+    .btn-refresh {
+      background: transparent;
+      border: 1px solid #c5cae9;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 13px;
+      cursor: pointer;
+      color: #5c6bc0;
+      line-height: 1;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .btn-refresh:hover { background: #e8eaf6; }
+
+    /* ─── Tool panels ─── */
+    .tool-panel { display: none; }
+    .tool-panel.active { display: block; }
+
+    /* ─── Section label ─── */
+    .section-label {
+      padding: 8px 12px 4px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+    .section-label.eligible   { color: #2e7d32; }
+    .section-label.ineligible { color: #9e9e9e; }
+    .section-label.discount   { color: #1565c0; }
+    .section-label.interest   { color: #6a1b9a; }
+    .section-label.rl         { color: #4e342e; }
+    .section-label.excl       { color: #6a1b9a; }
+
+    /* ─── Exclude form ─── */
+    .excl-card {
+      margin: 0 8px 10px;
+      background: #fff;
+      border-radius: 8px;
+      border: 1px solid #e0e0e0;
+      overflow: hidden;
+    }
+    .excl-field {
+      padding: 8px 12px 6px;
+      border-bottom: 1px solid #f5f5f5;
+    }
+    .excl-field:last-of-type { border-bottom: none; }
+    .excl-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #6a1b9a;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 5px;
+    }
+    /* Radio groups */
+    .excl-radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .excl-radio-group label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 3px 6px;
+      border-radius: 5px;
+    }
+    .excl-radio-group label:hover { background: #f3e5f5; }
+    .excl-radio-group input[type="radio"] { accent-color: #6a1b9a; margin: 0; }
+    /* Inline radio (YES/NO, Delinquent) */
+    .excl-radio-inline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .excl-radio-inline label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 14px;
+      border: 1.5px solid #ce93d8;
+      cursor: pointer;
+      background: #fce4ec00;
+    }
+    .excl-radio-inline label:has(input:checked) {
+      background: #6a1b9a;
+      color: #fff;
+      border-color: #6a1b9a;
+    }
+    .excl-radio-inline input[type="radio"] { display: none; }
+    /* Select */
+    .excl-select {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1.5px solid #ce93d8;
+      border-radius: 6px;
+      font-size: 12px;
+      background: #fff;
+      color: #2c2c2c;
+      outline: none;
+    }
+    .excl-select:focus { border-color: #6a1b9a; }
+    /* Date input */
+    .excl-date {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1.5px solid #ce93d8;
+      border-radius: 6px;
+      font-size: 12px;
+      background: #fff;
+      color: #2c2c2c;
+      outline: none;
+    }
+    .excl-date:focus { border-color: #6a1b9a; }
+    /* Product selector */
+    .excl-product-select {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1.5px solid #ce93d8;
+      border-radius: 6px;
+      font-size: 12px;
+      background: #f3e5f5;
+      font-weight: 600;
+      color: #4a148c;
+      outline: none;
+    }
+    /* Submit button */
+    .excl-submit-btn {
+      display: block;
+      width: calc(100% - 24px);
+      margin: 8px 12px 10px;
+      padding: 9px;
+      border-radius: 20px;
+      border: none;
+      background: #6a1b9a;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.3px;
+    }
+    .excl-submit-btn:hover:not(:disabled) { background: #4a148c; }
+    .excl-submit-btn:disabled  { opacity: 0.5; cursor: not-allowed; }
+    .excl-submit-btn.saving    { background: #9e9e9e; cursor: wait; }
+    .excl-submit-btn.saved     { background: #2e7d32; }
+    .excl-submit-btn.error     { background: #b71c1c; cursor: pointer; }
+    .excl-error-msg {
+      margin: 0 12px 8px;
+      padding: 6px 10px;
+      background: #ffebee;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #b71c1c;
+      display: none;
+    }
+
+    /* ─── RL notice cards ─── */
+    .rl-card {
+      margin: 0 8px 10px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #e0e0e0;
+      background: #fff;
+    }
+    .rl-card-header {
+      padding: 8px 12px 5px;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .rl-card-meta {
+      font-size: 10px;
+      font-weight: 400;
+      color: #757575;
+      margin-top: 1px;
+    }
+    /* DPD > threshold → staff fills form */
+    .rl-card.rl-staff .rl-card-header  { background: #fce4ec; color: #880e4f; }
+    .rl-card.rl-staff .rl-notice       { background: #fce4ec; }
+    /* DPD ≤ threshold → customer fills web form */
+    .rl-card.rl-web .rl-card-header    { background: #e8f5e9; color: #1b5e20; }
+    .rl-card.rl-web .rl-notice         { background: #e8f5e9; }
+
+    .rl-notice {
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.55;
+      border-top: 1px solid rgba(0,0,0,0.06);
+    }
+    .rl-notice strong { display: block; font-size: 12px; margin-bottom: 3px; }
+    .rl-notice-sub    { font-size: 11px; color: #5d4037; margin-top: 4px; font-style: italic; }
+    .rl-dpd-badge {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 700;
+      margin-left: 4px;
+    }
+    .rl-dpd-badge.over  { background: #e91e63; color: #fff; }
+    .rl-dpd-badge.under { background: #43a047; color: #fff; }
+    .rl-form-btn {
+      display: inline-block;
+      margin-top: 7px;
+      padding: 5px 14px;
+      border-radius: 16px;
+      font-size: 11px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+    }
+    .rl-form-btn.staff { background: #ad1457; color: #fff; }
+    .rl-form-btn.web   { background: #2e7d32; color: #fff; }
+    .rl-form-btn:disabled { opacity: 0.45; cursor: default; }
+
+    /* Action row — wraps form link + save button side by side */
+    .rl-action-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px 10px;
+      flex-wrap: wrap;
+    }
+
+    /* Save button — กดเพื่อบันทึก */
+    .rl-save-btn {
+      padding: 5px 14px;
+      border-radius: 16px;
+      font-size: 11px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      background: #1565c0;
+      color: #fff;
+      transition: background 0.2s, opacity 0.2s;
+    }
+    .rl-save-btn:hover:not(:disabled) { background: #0d47a1; }
+    .rl-save-btn.saving  { background: #9e9e9e; cursor: wait; }
+    .rl-save-btn.saved   { background: #2e7d32; cursor: default; }
+    .rl-save-btn.error   { background: #b71c1c; cursor: pointer; }
+
+    /* ─── Product card (eligible) ─── */
+    .product-card {
+      background: #fff;
+      margin: 0 8px 8px;
+      border-radius: 8px;
+      border: 1px solid #e0e0e0;
+      overflow: hidden;
+    }
+    .card-top {
+      padding: 8px 10px 6px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .product-name-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 700;
+      font-size: 13px;
+      color: #1b5e20;
+    }
+    .product-meta {
+      margin-top: 3px;
+      font-size: 11px;
+      color: #757575;
+    }
+    .card-total {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      padding: 7px 10px;
+      background: #f5f5f5;
+      border-bottom: 1px solid #eeeeee;
+    }
+    .total-label { font-size: 11px; color: #757575; }
+    .total-value { font-size: 18px; font-weight: 700; color: #1a237e; }
+    .total-unit  { font-size: 12px; color: #5c6bc0; }
+
+    /* ─── Zone table (Partial Payment) ─── */
+    .zone-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .zone-table thead tr { background: #f9f9f9; }
+    .zone-table th {
+      padding: 5px 10px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #9e9e9e;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      border-bottom: 1px solid #eeeeee;
+      text-align: left;
+    }
+    .zone-table th.col-pct,
+    .zone-table td.col-pct { text-align: center; width: 50px; }
+    .zone-table th.col-amt,
+    .zone-table td.col-amt { text-align: right; padding-right: 12px; }
+    .zone-table td {
+      padding: 8px 10px;
+      border-top: 1px solid #f5f5f5;
+      vertical-align: middle;
+    }
+    .zone-table tr.zone-green  td { background: #f1f8e9; }
+    .zone-table tr.zone-yellow td { background: #fffde7; }
+    .zone-table tr.zone-red    td { background: #fff8f6; }
+    .zone-table tr.zone-green.is-assigned  td { background: #dcedc8; }
+    .zone-table tr.zone-yellow.is-assigned td { background: #fff9c4; }
+    .zone-table tr.zone-red.is-assigned    td { background: #ffe0b2; }
+    .zone-table tr.is-assigned td:first-child { border-left: 3px solid #3949ab; }
+
+    .zone-dot {
+      display: inline-block;
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      margin-right: 5px;
+      vertical-align: middle;
+      flex-shrink: 0;
+    }
+    .zone-dot.green  { background: #43a047; }
+    .zone-dot.yellow { background: #fb8c00; }
+    .zone-dot.red    { background: #e53935; }
+    .zone-name-cell  { display: flex; align-items: center; }
+    .zone-label      { font-weight: 600; font-size: 12px; }
+    .zone-label.green  { color: #1b5e20; }
+    .zone-label.yellow { color: #e65100; }
+    .zone-label.red    { color: #b71c1c; }
+    .dpd-badge {
+      margin-left: 6px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      background: #3949ab;
+      color: #fff;
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+    .pct-text    { font-size: 12px; color: #555; font-weight: 600; }
+    .pct-unavail { font-size: 11px; color: #ccc; }
+    .amt-text    { font-size: 13px; font-weight: 700; }
+    .amt-text.green  { color: #2e7d32; }
+    .amt-text.yellow { color: #e65100; }
+    .amt-text.red    { color: #c62828; }
+    .amt-unavail { font-size: 11px; color: #ccc; font-style: italic; }
+    .amt-unit    { font-size: 11px; font-weight: 400; color: #9e9e9e; margin-left: 2px; }
+    .dpd-note {
+      padding: 5px 10px 7px;
+      font-size: 10px;
+      color: #5c6bc0;
+      background: #f3f4fb;
+      border-top: 1px solid #e8eaf6;
+    }
+
+    /* ─── PCL card extras ─── */
+
+    /* Recommended offer box */
+    .pcl-rec-box {
+      margin: 0;
+      padding: 10px 12px;
+      background: linear-gradient(135deg, #fff8e1 0%, #fff3cd 100%);
+      border-top: 2px solid #f9a825;
+      border-bottom: 1px solid #ffe082;
+    }
+    .pcl-rec-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #e65100;
+      margin-bottom: 4px;
+      letter-spacing: 0.2px;
+    }
+    .pcl-rec-amount {
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+      margin-bottom: 4px;
+    }
+    .pcl-rec-value {
+      font-size: 22px;
+      font-weight: 800;
+      color: #bf360c;
+      line-height: 1;
+    }
+    .pcl-rec-unit {
+      font-size: 12px;
+      font-weight: 500;
+      color: #bf360c;
+    }
+    .pcl-rec-sub {
+      font-size: 10px;
+      color: #795548;
+      font-style: italic;
+    }
+
+    /* Step-down note */
+    .pcl-note {
+      padding: 6px 10px;
+      font-size: 11px;
+      color: #1565c0;
+      background: #e3f2fd;
+      border-top: 1px solid #bbdefb;
+      border-bottom: 1px solid #bbdefb;
+    }
+    .zone-table th.col-appt,
+    .zone-table td.col-appt { width: 72px; }
+    .zone-table th.col-reduction,
+    .zone-table td.col-reduction { text-align: center; width: 110px; }
+    .pcl-reduction      { font-size: 11px; font-weight: 600; color: #2e7d32; }
+    .pcl-reduction.none { color: #bdbdbd; font-weight: 400; }
+
+    /* ─── Ineligible card ─── */
+    .ineligible-card {
+      background: #fff;
+      margin: 0 8px 6px;
+      border-radius: 8px;
+      border: 1px solid #f0f0f0;
+      padding: 8px 10px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .ineligible-icon  { font-size: 14px; margin-top: 1px; }
+    .ineligible-body  { flex: 1; }
+    .ineligible-name  { font-weight: 600; font-size: 12px; color: #9e9e9e; }
+    .ineligible-reason{ font-size: 11px; color: #bdbdbd; font-style: italic; margin-top: 2px; }
+    .ineligible-total { font-size: 11px; color: #9e9e9e; margin-top: 1px; }
+
+    /* ─── Discount tool ─── */
+    .disc-card {
+      background: #fff;
+      margin: 0 8px 8px;
+      border-radius: 8px;
+      border: 1px solid #e0e0e0;
+      overflow: hidden;
+    }
+    .disc-header {
+      padding: 8px 10px 6px;
+      border-bottom: 1px solid #f0f0f0;
+      font-weight: 700;
+      font-size: 13px;
+      color: #1565c0;
+    }
+    .disc-meta {
+      font-size: 11px;
+      color: #757575;
+      font-weight: 400;
+      margin-top: 2px;
+    }
+    .disc-total-row {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      padding: 6px 10px;
+      background: #e3f2fd;
+      border-bottom: 1px solid #bbdefb;
+    }
+    .disc-total-label { font-size: 11px; color: #1565c0; }
+    .disc-total-value { font-size: 16px; font-weight: 700; color: #0d47a1; }
+    .disc-total-unit  { font-size: 11px; color: #5c6bc0; }
+    .disc-waive-notice {
+      margin: 0 0 2px;
+      padding: 10px 12px;
+      background: #fff8e1;
+      border-top: 2px solid #f9a825;
+      font-size: 12px;
+      color: #5d4037;
+      line-height: 1.6;
+    }
+    .disc-waive-notice strong { color: #e65100; }
+    .disc-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .disc-table thead tr { background: #f5f9ff; }
+    .disc-table th {
+      padding: 4px 8px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #9e9e9e;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      border-bottom: 1px solid #e3f2fd;
+      text-align: right;
+    }
+    .disc-table th:first-child { text-align: center; width: 48px; }
+    .disc-table td {
+      padding: 6px 8px;
+      border-top: 1px solid #f0f4ff;
+      font-size: 12px;
+      text-align: right;
+    }
+    .disc-table td:first-child { text-align: center; }
+    .disc-pct    { font-weight: 700; color: #1565c0; font-size: 12px; }
+    .disc-amt    { color: #e53935; }
+    .disc-actual { font-weight: 700; color: #1b5e20; font-size: 13px; }
+    .disc-unit   { font-size: 10px; color: #9e9e9e; margin-left: 2px; }
+
+    /* ─── Interest calculator tool ─── */
+    .int-card {
+      background: #fff;
+      margin: 0 8px 8px;
+      border-radius: 8px;
+      border: 1px solid #e0e0e0;
+      overflow: hidden;
+    }
+    .int-header {
+      padding: 8px 10px 6px;
+      border-bottom: 1px solid #f0f0f0;
+      font-weight: 700;
+      font-size: 13px;
+      color: #6a1b9a;
+    }
+    .int-meta { font-size: 11px; color: #757575; font-weight: 400; margin-top: 2px; }
+    .int-form {
+      padding: 8px 10px;
+    }
+    .int-form-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .int-form-row label {
+      width: 110px;
+      flex-shrink: 0;
+      font-size: 11px;
+      color: #555;
+    }
+    .int-form-row select,
+    .int-form-row input[type="number"] {
+      flex: 1;
+      padding: 4px 7px;
+      border: 1px solid #d0d0d0;
+      border-radius: 5px;
+      font-size: 12px;
+      color: #333;
+      background: #fafafa;
+      outline: none;
+    }
+    .int-form-row select:focus,
+    .int-form-row input[type="number"]:focus {
+      border-color: #7b1fa2;
+      background: #fff;
+    }
+    .int-result {
+      margin: 4px 10px 10px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #f3e5f5;
+      border: 1px solid #ce93d8;
+      min-height: 42px;
+      font-size: 12px;
+    }
+    .int-hint { color: #9e9e9e; font-size: 11px; font-style: italic; }
+    .ir-row { display: flex; align-items: baseline; gap: 6px; margin-bottom: 3px; }
+    .ir-row:last-child { margin-bottom: 0; }
+    .ir-label { color: #555; font-size: 11px; flex: 1; }
+    .ir-val   { font-size: 14px; font-weight: 700; color: #4a148c; }
+    .ir-val.total { font-size: 16px; color: #6a1b9a; }
+    .ir-unit  { font-size: 11px; color: #9e9e9e; }
+    .int-empty {
+      padding: 20px 12px;
+      text-align: center;
+      color: #bdbdbd;
+      font-size: 12px;
+    }
+
+    /* ─── Divider ─── */
+    .divider { height: 1px; background: #e0e0e0; margin: 6px 8px; }
+
+    /* ─── Buttons ─── */
+    .btn-retry {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 7px 18px;
+      background: transparent;
+      color: #3949ab;
+      border: 1px solid #3949ab;
+      border-radius: 20px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn-retry:hover { background: #e8eaf6; }
+
+    .no-data {
+      padding: 12px;
+      text-align: center;
+      font-size: 12px;
+      color: #bdbdbd;
+      font-style: italic;
+    }
+    .bottom-pad { height: 10px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div class="header">
+  <span>💼 DC Collection Tool</span>
+  <span class="header-phase">Phase 1</span>
+</div>
+
+<!-- ── Tool tabs ── -->
+<div class="tool-tabs">
+  <button class="tool-tab active" data-tool="partial">🧮 Partial</button>
+  <button class="tool-tab"        data-tool="discount">💸 Discount</button>
+  <button class="tool-tab"        data-tool="exclude">🚫 Exclude</button>
+  <button class="tool-tab"        data-tool="rl">🔄 RL</button>
+  <button class="tool-tab"        data-tool="interest">📊 ดอกเบี้ย</button>
+</div>
+
+<!-- ── State: wrong page ── -->
+<div id="state-wrong" class="state-screen state-wrong" style="display:none">
+  กรุณาเปิดหน้า Case Detail ก่อน<br>
+  <small>(collections.scredit.in.th/main/case/detail/...)</small>
+</div>
+
+<!-- ── State: loading ── -->
+<div id="state-loading" class="state-screen" style="display:none">
+  <div class="spinner"></div>
+  <div class="loading-text">กำลังดึงข้อมูล...</div>
+</div>
+
+<!-- ── State: error ── -->
+<div id="state-error" class="state-screen state-error" style="display:none">
+  <div id="error-message"></div>
+  <button id="btn-retry" class="btn-retry">🔄 ลองใหม่</button>
+</div>
+
+<!-- ── State: result ── -->
+<div id="state-result" style="display:none">
+
+  <!-- Customer info bar with refresh button -->
+  <div class="customer-bar">
+    <div class="customer-info">
+      <div class="customer-name" id="r-name">—</div>
+      <div class="customer-ids">
+        Credit ID: <span id="r-userId">—</span>
+        <span class="id-sep">·</span>
+        Shopee: <span id="r-shopeeId">—</span>
+      </div>
+      <div class="customer-agent">Agent: <span id="r-agent">—</span></div>
+    </div>
+    <button id="btn-refresh" class="btn-refresh" title="ดึงข้อมูลใหม่">🔄</button>
+  </div>
+
+  <!-- ── TOOL PANEL: Partial Payment ── -->
+  <div id="panel-partial" class="tool-panel active">
+    <div class="section-label eligible" id="eligible-header">✅ มีสิทธิ์ Partial Payment</div>
+    <div id="eligible-list"></div>
+
+    <div id="ineligible-section" style="display:none">
+      <div class="divider"></div>
+      <div class="section-label ineligible">❌ ไม่มีสิทธิ์</div>
+      <div id="ineligible-list"></div>
+    </div>
+  </div>
+
+  <!-- ── TOOL PANEL: Discount ── -->
+  <div id="panel-discount" class="tool-panel">
+    <div class="section-label discount">💸 ส่วนลดปิดบัญชี (WRO 3)</div>
+    <div id="discount-content"></div>
+  </div>
+
+  <!-- ── TOOL PANEL: Interest calculator ── -->
+  <div id="panel-interest" class="tool-panel">
+    <div class="section-label interest">📊 คำนวณดอกเบี้ยล่าช้า</div>
+    <div id="interest-content"></div>
+  </div>
+
+  <!-- ── TOOL PANEL: Exclude ── -->
+  <div id="panel-exclude" class="tool-panel">
+    <div class="section-label excl">🚫 Exclude</div>
+    <div id="exclude-content"></div>
+  </div>
+
+  <!-- ── TOOL PANEL: Restructure Loan (RL) ── -->
+  <div id="panel-rl" class="tool-panel">
+    <div class="section-label rl">🔄 Restructure Loan (RL)</div>
+    <div id="rl-content"></div>
+  </div>
+
+  <div class="bottom-pad"></div>
+</div>
+
+<script src="config.js"></script>
+<script src="eligibility.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>
