@@ -79,8 +79,8 @@ async function runAnalysis() {
   // Handle "user is not on Bill Info tab" gracefully
   if (rawData.error === 'BILL_INFO_TAB_NOT_ACTIVE') {
     showError(
-      'กรุณาไปที่แท็บ "Bill Info" ก่อน แล้วเปิด popup ใหม่\n' +
-      'หรือกดปุ่ม 🔄 ลองใหม่ หลังจากเปลี่ยนแท็บแล้ว'
+      'กรุณาไปที่แท็บ "Bill Info" / "ข้อมูลบิล" ก่อน\n' +
+      'แล้วกดปุ่ม 🔄 ลองใหม่'
     );
     return;
   }
@@ -251,28 +251,42 @@ function buildIneligibleCard(p) {
 }
 
 // ---------------------------------------------------------------------------
-// Panel: Discount
+// Panel: Discount (M-based tiers)
+// M = ceil(DPD / 30)  แสดงเฉพาะ tier ที่ลูกค้าถึงแล้ว (minM ≤ M)
 // ---------------------------------------------------------------------------
 function renderDiscountPanel(groups) {
   const el = document.getElementById('discount-content');
 
-  if (!groups.length) {
-    el.innerHTML = '<div class="no-data">ไม่มีข้อมูลสำหรับคำนวณส่วนลด</div>';
+  // แสดงเฉพาะสินเชื่อที่อยู่ใน DISCOUNT_ELIGIBLE_PRODUCTS
+  const eligibleGroups = groups.filter(g =>
+    DISCOUNT_ELIGIBLE_PRODUCTS.includes(g.productType)
+  );
+
+  if (!eligibleGroups.length) {
+    el.innerHTML = '<div class="no-data">ไม่มีสินเชื่อที่รองรับส่วนลด</div>';
     return;
   }
 
-  el.innerHTML = groups.map(g => buildDiscountCard(g)).join('');
+  el.innerHTML = eligibleGroups.map(g => buildDiscountCard(g)).join('');
 }
 
 function buildDiscountCard(group) {
-  const dpd       = group.maxDaysPastDue;
-  const isOverDPD = dpd > DISCOUNT_DPD_THRESHOLD;
+  const dpd   = group.maxDaysPastDue;
+  const M     = Math.ceil(dpd / 30);
+  const SCL_TYPES = ['SCL', 'SCL Nano', 'SCL P-loan'];
+  const tiers = SCL_TYPES.includes(group.productType) ? DISCOUNT_TIERS_SCL : DISCOUNT_TIERS_SPL_PCL;
+
+  // Tier ที่ลูกค้าถึงแล้ว (minM ≤ M) = แสดงทั้งหมดตั้งแต่ต้นจนถึง tier ปัจจุบัน
+  const applicableTiers = tiers.filter(t => t.minM <= M);
+
+  // Tier ที่ M ตกอยู่ในช่วง [minM, maxM] = tier ปัจจุบัน
+  const currentTier = tiers.find(t => t.minM <= M && M <= t.maxM);
 
   const header = `
     <div class="disc-card">
       <div class="disc-header">
         💸 ${esc(group.productLabel)}
-        <div class="disc-meta">${group.billCount} บิล &nbsp;·&nbsp; DPD สูงสุด ${dpd} วัน</div>
+        <div class="disc-meta">${group.billCount} บิล &nbsp;·&nbsp; DPD สูงสุด ${dpd} วัน &nbsp;·&nbsp; <strong>M${M}</strong></div>
       </div>
       <div class="disc-total-row">
         <span class="disc-total-label">ยอดค้างรวม:</span>
@@ -280,30 +294,40 @@ function buildDiscountCard(group) {
         <span class="disc-total-unit">THB</span>
       </div>`;
 
-  if (!isOverDPD) {
-    // DPD ≤ 181 — ยังไม่ถึงเกณฑ์ส่วนลด
+  if (!applicableTiers.length) {
+    // M < 7 — ยังไม่ถึงเกณฑ์ส่วนลด
     return header + `
       <div class="disc-waive-notice">
-        ℹ️ DPD ไม่เกิน ${DISCOUNT_DPD_THRESHOLD} วัน<br>
-        <strong>สามารถนำเสนอ Waive ค่าติดตามทวงถามได้เท่านั้น</strong>
+        ℹ️ M${M} (DPD ${dpd} วัน) ยังไม่ถึงเกณฑ์ (ต้องถึง M7 ขึ้นไป)<br>
+        <strong>ยังไม่มีสิทธิ์ส่วนลด</strong>
       </div>
     </div>`;
   }
 
-  // DPD > 181 — แสดงตารางส่วนลด
-  const rows = calculateDiscount(group.totalDue, DISCOUNT_PERCENTAGES);
-  const tableRows = rows.map(r => `
-    <tr>
-      <td><span class="disc-pct">${r.pct}%</span></td>
-      <td><span class="disc-amt">${fmt(r.discountAmt)}</span><span class="disc-unit">THB</span></td>
-      <td><span class="disc-actual">${fmtInt(r.actualAmt)}</span><span class="disc-unit">THB</span></td>
-    </tr>`).join('');
+  const tableRows = applicableTiers.map(tier => {
+    const isCurrent  = tier === currentTier;
+    const rangeLabel = tier.maxM === Infinity
+      ? `M${tier.minM}+`
+      : `M${tier.minM}–M${tier.maxM}`;
+    const r = calculateDiscount(group.totalDue, [tier.maxPct])[0];
+    return `
+      <tr${isCurrent ? ' class="disc-current-tier"' : ''}>
+        <td>
+          ${rangeLabel}
+          ${isCurrent ? '<span class="disc-m-badge">ปัจจุบัน</span>' : ''}
+        </td>
+        <td><span class="disc-pct">${tier.maxPct}%</span></td>
+        <td><span class="disc-amt">${fmt(r.discountAmt)}</span><span class="disc-unit">THB</span></td>
+        <td><span class="disc-actual">${fmtInt(r.actualAmt)}</span><span class="disc-unit">THB</span></td>
+      </tr>`;
+  }).join('');
 
   return header + `
-      <table class="disc-table">
+      <table class="disc-table disc-m-table">
         <thead>
           <tr>
-            <th>%</th>
+            <th class="col-m">ช่วง M</th>
+            <th>% สูงสุด</th>
             <th>ส่วนลดที่ได้รับ</th>
             <th>ยอดชำระจริง</th>
           </tr>
@@ -488,9 +512,12 @@ function buildRLCard(group) {
   const dpd       = group.maxDaysPastDue;
   const isOverDPD = dpd > RL_DPD_THRESHOLD;
 
+  // SPL CCC / SPLX CCC — ลูกค้าต้องกรอกเว็บฟอร์มเอง เสมอ ไม่ว่า DPD จะเท่าไร
+  const forceWebForm = RL_ALWAYS_WEB_FORM_PRODUCTS.includes(group.productType);
+
   const dpdBadge = `<span class="rl-dpd-badge ${isOverDPD ? 'over' : 'under'}">DPD ${dpd} วัน</span>`;
 
-  if (isOverDPD) {
+  if (isOverDPD && !forceWebForm) {
     // DPD > 61 — พนักงานกรอกแบบฟอร์มให้ลูกค้า + บันทึกลง Sheets
     const formLink = RL_STAFF_FORM_URL
       ? `<a class="rl-form-btn staff" href="${RL_STAFF_FORM_URL}" target="_blank">📋 เปิดแบบฟอร์มพนักงาน</a>`
@@ -528,7 +555,9 @@ function buildRLCard(group) {
         </div>
         <div class="rl-notice">
           <strong>แนะนำให้ลูกค้ากรอกเว็บฟอร์มด้วยตนเอง</strong>
-          DPD ไม่เกิน ${RL_DPD_THRESHOLD} วัน ลูกค้าสามารถยื่นขอ Restructure ผ่านเว็บฟอร์มได้เลย
+          ${forceWebForm && isOverDPD
+            ? 'ลูกค้าสามารถยื่นขอ Restructure ผ่านเว็บฟอร์มได้เลย'
+            : `DPD ไม่เกิน ${RL_DPD_THRESHOLD} วัน ลูกค้าสามารถยื่นขอ Restructure ผ่านเว็บฟอร์มได้เลย`}
         </div>
         <div class="rl-action-row">${btnHtml}</div>
       </div>`;
@@ -663,6 +692,9 @@ function updateInterestCard(card) {
 // ---------------------------------------------------------------------------
 function getActiveTab() {
   return new Promise(resolve => {
+    // Works for both popup mode and iframe (overlay) mode:
+    // - Popup mode: returns the tab that was active before the popup opened
+    // - Iframe mode: the iframe IS on the active tab, so this returns the same tab
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
       resolve(tabs[0] ?? null);
     });

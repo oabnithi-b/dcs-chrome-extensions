@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__visualize__read_me",
+      "Bash(node -e ' *)",
+      "Bash(node _test_temp.js)",
+      "Bash(del _test_temp.js)",
+      "Bash(node _test2.js)",
+      "Bash(rm -f _test2.js _test_temp.js)",
+      "mcp__visualize__show_widget"
+    ]
+  }
+}

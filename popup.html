@@ -606,6 +606,24 @@
     .disc-actual { font-weight: 700; color: #1b5e20; font-size: 13px; }
     .disc-unit   { font-size: 10px; color: #9e9e9e; margin-left: 2px; }
 
+    /* M-based discount table overrides */
+    .disc-m-table th.col-m,
+    .disc-m-table td:first-child  { text-align: left; width: 90px; }
+    .disc-m-table th:not(.col-m)  { text-align: right; }
+    .disc-current-tier td          { background: #e8f5e9; }
+    .disc-current-tier td:first-child { border-left: 3px solid #2e7d32; }
+    .disc-m-badge {
+      display: inline-block;
+      margin-left: 4px;
+      padding: 1px 5px;
+      background: #2e7d32;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      border-radius: 4px;
+      vertical-align: middle;
+    }
+
     /* ─── Interest calculator tool ─── */
     .int-card {
       background: #fff;

@@ -14,7 +14,13 @@
   "content_scripts": [
     {
       "matches": ["https://collections.scredit.in.th/main/case/detail/*"],
-      "js": ["config.js", "eligibility.js", "content.js"]
+      "js": ["config.js", "eligibility.js", "content.js", "overlay.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html"],
+      "matches": ["https://collections.scredit.in.th/*"]
     }
   ],
   "action": {
