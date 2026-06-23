@@ -1,19 +1,32 @@
 {
   "manifest_version": 3,
   "name": "DC Collection Tool",
-  "version": "1.1.0",
-  "description": "Partial Payment eligibility engine for DC agents",
-  "permissions": ["activeTab", "scripting", "tabs"],
+  "version": "2.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArXd888JMM1NoIoFIVIM5YaGfY2drrlwIOE3Y/5Va150s8lofY3N/Upndqon3nbJokIt33YXmFCdMwtVpjtOppdoQIadN3csKwgU0vVePcdFOrsNoCbH6hgu6UaNTAiv8ZTevFx+lolP/p0De/9CwlcVRR/1LUoOdaY1Un+9nQnEWQN7yHDuVYAJea+SXAsOP0pcDao50BnmJmpk1eaBzelsugspWAldpYmNM7Vw6YwQMnUGly1snOvWwbvo5K2kLN4RKtZPu7MPRYer1p1AueAse/ELLSPb2AlZr+LfWLoLefmI3A1czEodNPdKiB0bETlKzcRSwhw/e6QmLMYca/QIDAQAB",
+  "description": "DC Collection Tool Phase 2 — Partial Payment, SMS Trigger, Auth",
+  "permissions": ["activeTab", "scripting", "tabs", "identity", "storage", "alarms"],
   "host_permissions": [
     "https://collections.scredit.in.th/*",
-    "https://script.google.com/*"
+    "https://script.google.com/*",
+    "https://www.googleapis.com/*",
+    "https://api.ipify.org/*"
   ],
+  "oauth2": {
+    "client_id": "568594730241-muj8d3iqi2d9fk9o8mvehaqe3igjn86c.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ]
+  },
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://collections.scredit.in.th/main/case/detail/*"],
+      "matches": [
+        "https://collections.scredit.in.th/main/case/*",
+        "https://collections.scredit.in.th/main/agentWorkstation/case/*"
+      ],
       "js": ["config.js", "eligibility.js", "content.js", "overlay.js"]
     }
   ],

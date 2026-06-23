@@ -27,16 +27,25 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 // DOM extraction
 // ---------------------------------------------------------------------------
 
+// Cache key for sessionStorage — one entry per case ID.
+// This allows the extension to show the last-known data when an inbound call
+// bar permanently displaces the page and extractBillRows() returns nothing.
+function cacheKey(caseId) {
+  return 'dc_case_' + (caseId || 'unknown');
+}
+
 async function extractData() {
   const userInfo = extractUserInfo();
+  const key      = cacheKey(userInfo.caseId);
 
-  // Retry up to 5× with 600 ms gap — the SPA may still be rendering the Bill
-  // table when the iframe fires its first EXTRACT_DATA (timing issue).
+  // Retry up to 5× with 800 ms gap — the SPA may still be rendering the Bill
+  // table on first load.  (Inbound call bar is handled by the cache fallback
+  // below, not by waiting longer.)
   let billRows = [];
   for (let attempt = 0; attempt < 5; attempt++) {
     billRows = extractBillRows();
     if (billRows.length > 0) break;
-    if (attempt < 4) await new Promise(r => setTimeout(r, 600));
+    if (attempt < 4) await new Promise(r => setTimeout(r, 800));
   }
 
   if (billRows.length === 0) {
@@ -50,6 +59,15 @@ async function extractData() {
     if (billTab && billTab.getAttribute('aria-selected') !== 'true') {
       return { error: 'BILL_INFO_TAB_NOT_ACTIVE', userInfo, billRows: [] };
     }
+
+    // Live extraction failed — try sessionStorage cache (e.g. inbound call bar
+    // has permanently pushed the page content so the bill table is gone).
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(key) || 'null');
+      if (cached && Array.isArray(cached.billRows) && cached.billRows.length > 0) {
+        return { userInfo: cached.userInfo, billRows: cached.billRows, fromCache: true };
+      }
+    } catch (_) {}
   }
 
   // Augment productType using Bill Details section headers (e.g. SPL CCC vs SPL Digi).
@@ -68,7 +86,14 @@ async function extractData() {
     // Non-fatal — original productType codes remain
   }
 
-  return { userInfo, billRows };
+  const result = { userInfo, billRows };
+
+  // Persist to sessionStorage so the inbound-call cache fallback can use it.
+  if (billRows.length > 0) {
+    try { sessionStorage.setItem(key, JSON.stringify(result)); } catch (_) {}
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,12 +248,80 @@ function extractUserInfo() {
                ?.textContent?.trim() ?? null;
   }
 
+  // Fallback: find field by label visible text (for fields whose [for] attr is unknown)
+  function getFieldByLabel(labelText) {
+    const labels = Array.from(document.querySelectorAll('label'));
+    const match  = labels.find(l => l.textContent.trim().replace(/\s+/g, ' ') === labelText);
+    if (!match) return null;
+    const item = match.closest('.ant-form-item');
+    return item?.querySelector('.ant-form-item-control-input-content')
+               ?.textContent?.trim() ?? null;
+  }
+
+  // Extract caseId correctly for both page types:
+  //   Normal:   /main/case/detail/12831655            → "12831655"
+  //   Inbound:  /main/agentWorkstation/case/inboundCallDetail?conversationId=…
+  //             → try DOM link to /case/detail/, otherwise use conversationId param
+  function extractCaseId() {
+    const href = window.location.href;
+
+    // Normal case detail page
+    const detailMatch = href.match(/\/case\/detail\/([^/?#]+)/);
+    if (detailMatch) return detailMatch[1];
+
+    // Inbound call page — look for a DOM link back to the case detail
+    const caseLink = document.querySelector('a[href*="/case/detail/"]');
+    if (caseLink) {
+      const m = (caseLink.href || '').match(/\/case\/detail\/([^/?#]+)/);
+      if (m) return m[1];
+    }
+
+    // Strategy A: ant-descriptions layout (inbound workstation page)
+    // Structure: span.ant-descriptions-item-label + span.ant-descriptions-item-content
+    const descLabels = Array.from(document.querySelectorAll('span.ant-descriptions-item-label'));
+    for (const label of descLabels) {
+      if (/^Case\s*ID\s*:?\s*$/i.test(label.textContent.trim())) {
+        const container = label.closest('.ant-descriptions-item-container');
+        const content   = container?.querySelector('span.ant-descriptions-item-content');
+        if (content) {
+          const m = content.textContent.trim().match(/^(\d{5,})/);
+          if (m) return m[1];
+        }
+      }
+    }
+
+    // Strategy B: scan innerText with flexible regex (colon optional)
+    const bodyText = document.body.innerText || '';
+    const domMatch = bodyText.match(/Case\s+ID\s*[：:]?\s*(\d{5,})/);
+    if (domMatch) return domMatch[1];
+
+    // Strategy C: find leaf element whose text is exactly "Case ID" then read sibling/parent
+    const allEls = Array.from(document.querySelectorAll('span, div, td, p, label'));
+    for (const el of allEls) {
+      if (el.children.length > 0) continue;
+      if (!/^Case\s*ID\s*:?\s*$/.test(el.textContent.trim())) continue;
+      const sib = el.nextElementSibling;
+      if (sib) {
+        const m = sib.textContent.trim().match(/^(\d{5,})/);
+        if (m) return m[1];
+      }
+      const parentText = el.parentElement?.textContent || '';
+      const pm = parentText.match(/Case\s*ID\s*[：:]?\s*(\d{5,})/);
+      if (pm) return pm[1];
+    }
+
+    // Nothing found — return null (Case ID column will be blank)
+    return null;
+  }
+
   return {
     agentEmail:   document.querySelector('.name___2eduw')?.textContent?.trim() ?? null,
     creditUserId: getField('userInfo_userId'),
     name:         getField('userInfo_userName'),
-    shopeeUserId: getField('userInfo_shopeeUserId'),
-    caseId:       window.location.href.split('/').pop(),
+    shopeeUserId: getField('userInfo_shopeePayUserId')
+                  ?? getFieldByLabel('Shopee Pay User ID')
+                  ?? getField('userInfo_shopeeUserId'),
+    caseId:       extractCaseId(),
   };
 }
 
