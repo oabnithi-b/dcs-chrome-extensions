@@ -8,6 +8,8 @@
 // [CONFIGURABLE RULE] — replace with your deployed Apps Script URL
 const WEB_APP_URL         = 'https://script.google.com/a/macros/monee.com/s/AKfycbzGTo09Y8nVSP_yjurRuS9ikUzfF3gDIutyguBUho8LXwClrAfMFD5SwYaqrxISbfoZ/exec';
 const EXCLUDE_WEB_APP_URL = 'https://script.google.com/a/macros/monee.com/s/AKfycbxUFOXnj_3QKPqYiMv6v4zc7ELdPe83Za7-wemcrp8xWpaqHbIlfgM-hsgZFCKkVZO1aA/exec';
+const PHONE_WEB_APP_URL   = 'https://script.google.com/a/macros/monee.com/s/AKfycbyaAsIBtH93M-lT8oMjBWsDFjP1BTkofr2qx_Zv7jbvxFC8hpNWaJtLZuqn3y5qUYS9QQ/exec';
+const SMS_WEB_APP_URL     = 'https://script.google.com/a/macros/monee.com/s/AKfycbxpue9i80KYyJ3OroEN5hVPR_cUgn2eAOpz5UCKBLzUiFqbEzN_UzYTaRack3i08iMo/exec';
 
 // =============================================================================
 // RESTRUCTURE LOAN (RL) CONFIG

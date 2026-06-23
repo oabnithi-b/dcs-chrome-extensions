@@ -8,6 +8,39 @@ let currentResult = null;     // last successful evaluate() result (for RL save)
 let currentTabId  = null;     // active Chrome tab ID (for sending messages)
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // ── Detect iframe vs popup mode ──────────────────────────────────────────
+  const inIframe = (window.self !== window.top);
+  if (inIframe) {
+    document.body.classList.add('in-iframe');
+  }
+
+  // ── If opened as toolbar popup, close the overlay on the page ───────────
+  if (!inIframe) {
+    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'CLOSE_OVERLAY' }, () => {
+          void chrome.runtime.lastError; // suppress "no receiver" error if overlay not injected
+        });
+      }
+    });
+  }
+
+  // ── Open Overlay (D Tool panel on the page) ─────────────────────────────
+  const btnOpenOverlay = document.getElementById('btn-open-overlay');
+  if (btnOpenOverlay) {
+    btnOpenOverlay.addEventListener('click', async () => {
+      const tabId = currentTabId ?? await new Promise(resolve => {
+        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+          resolve(tabs[0]?.id ?? null);
+        });
+      });
+      if (tabId) {
+        chrome.tabs.sendMessage(tabId, { type: 'OPEN_OVERLAY' });
+      }
+      window.close();
+    });
+  }
+
   // Tool tab switching
   document.querySelectorAll('.tool-tab[data-tool]').forEach(tab => {
     tab.addEventListener('click', () => switchTool(tab.dataset.tool));
@@ -110,6 +143,7 @@ async function runAnalysis() {
   result.name         = rawData.userInfo.name;
   result.shopeeUserId = rawData.userInfo.shopeeUserId;
   result.agentEmail   = rawData.userInfo.agentEmail;
+  result.fromCache    = !!rawData.fromCache;
 
   renderResult(result);
 }
@@ -118,6 +152,10 @@ async function runAnalysis() {
 // Master render — populates all three tool panels at once
 // ---------------------------------------------------------------------------
 function renderResult(result) {
+  // Show/hide inbound-call cache banner
+  const cacheBanner = document.getElementById('cache-banner');
+  if (cacheBanner) cacheBanner.style.display = result.fromCache ? '' : 'none';
+
   setText('r-name',    result.name         || '—');
   setText('r-userId',  result.creditUserId || '—');
   setText('r-shopeeId',result.shopeeUserId || '—');
@@ -129,6 +167,8 @@ function renderResult(result) {
   renderExcludePanel(result.allActiveGroups || []);
   renderRLPanel(result.allActiveGroups || []);
   renderInterestPanel(result.allActiveGroups || []);
+  renderPhonePanel(result);
+  renderSmsPanel(result);
 
   showState('result');
   switchTool(currentTool); // keep whichever tab was last active
@@ -394,6 +434,14 @@ function renderExcludePanel(groups) {
         </div>
       </div>
 
+      <!-- 3b. ยอดนัดชำระ — แสดงเฉพาะเมื่อเลือก YES -->
+      <div class="excl-field" id="excl-ptp-amount-field" style="display:none;">
+        <div class="excl-label">ยอดนัดชำระ (บาท)</div>
+        <input type="number" id="excl-ptp-amount" class="excl-text-input"
+               placeholder="0.00" min="0" step="0.01"
+               style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:0.85rem;">
+      </div>
+
       <!-- 4. Delinquent -->
       <div class="excl-field">
         <div class="excl-label">4. Delinquent</div>
@@ -419,6 +467,15 @@ function renderExcludePanel(groups) {
   document.getElementById('excl-submit-btn').addEventListener('click', () => {
     saveExcludeRecord(groups);
   });
+
+  // Show/hide ยอดนัดชำระ field based on YES/NO selection
+  document.querySelectorAll('input[name="excl-appoint"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const isYes = document.querySelector('input[name="excl-appoint"]:checked')?.value === 'YES';
+      document.getElementById('excl-ptp-amount-field').style.display = isYes ? '' : 'none';
+      if (!isYes) document.getElementById('excl-ptp-amount').value = '';
+    });
+  });
 }
 
 async function saveExcludeRecord(groups) {
@@ -430,6 +487,7 @@ async function saveExcludeRecord(groups) {
   const excludeType     = document.querySelector('input[name="excl-type"]:checked')?.value || '';
   const reason          = document.getElementById('excl-reason').value;
   const appointStatus   = document.querySelector('input[name="excl-appoint"]:checked')?.value || '';
+  const ptpAmount       = appointStatus === 'YES' ? (document.getElementById('excl-ptp-amount').value || '') : '';
   const delinquent      = document.querySelector('input[name="excl-delinquent"]:checked')?.value || '';
   const nextCallingDate = document.getElementById('excl-next-date').value;
 
@@ -467,6 +525,7 @@ async function saveExcludeRecord(groups) {
     excludeType,
     reason,
     appointStatus,
+    ptpAmount,
     delinquent,
     nextCallingDate,
   };
@@ -542,7 +601,7 @@ function buildRLCard(group) {
         </div>
       </div>`;
   } else {
-    // DPD ≤ 61 — แนะนำลูกค้ากรอกเว็บฟอร์มเอง
+    // DPD ≤ 61 หรือ forceWebForm — แนะนำลูกค้ากรอกเว็บฟอร์มเอง
     const btnHtml = RL_WEB_FORM_URL
       ? `<a class="rl-form-btn web" href="${RL_WEB_FORM_URL}" target="_blank">🌐 เปิดเว็บฟอร์มลูกค้า</a>`
       : `<button class="rl-form-btn web" disabled>🌐 เว็บฟอร์มลูกค้า (ยังไม่ได้ตั้งค่า URL)</button>`;
@@ -598,7 +657,13 @@ async function saveRLRecord(group, btn) {
   };
 
   try {
-    await sendToBackground({ type: 'SEND_TO_SHEETS', url: WEB_APP_URL, payload });
+    const res = await sendToBackground({ type: 'SEND_TO_SHEETS', url: WEB_APP_URL, payload });
+    // rowsWritten === 0 means Apps Script returned ok but wrote nothing —
+    // most likely cause: old deployment without RL routing. Show error so
+    // the user knows to redeploy rather than silently showing "saved".
+    if (res && typeof res.rowsWritten === 'number' && res.rowsWritten === 0) {
+      throw new Error('Apps Script ไม่ได้บันทึกข้อมูล (rowsWritten=0)\nกรุณา Redeploy Apps Script ใหม่');
+    }
     btn.textContent = '✅ บันทึกแล้ว';
     btn.classList.remove('saving');
     btn.classList.add('saved');
@@ -688,13 +753,263 @@ function updateInterestCard(card) {
 }
 
 // ---------------------------------------------------------------------------
+// Panel: ดึงเบอร์ (Phone)
+// ---------------------------------------------------------------------------
+function renderPhonePanel(result) {
+  const el = document.getElementById('phone-content');
+
+  el.innerHTML = `
+    <div class="excl-card">
+      <div class="excl-field">
+        <div class="excl-label">สถานะเบอร์</div>
+        <div class="excl-radio-inline">
+          <label><input type="radio" name="phone-status" value="Primary"> Primary</label>
+          <label><input type="radio" name="phone-status" value="EC"> EC</label>
+          <label><input type="radio" name="phone-status" value="อื่นๆ"> อื่นๆ</label>
+        </div>
+      </div>
+      <div class="excl-field">
+        <div class="excl-label">เบอร์โทร</div>
+        <input type="tel" id="phone-number"
+               placeholder="0XX-XXX-XXXX"
+               style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:0.85rem;">
+      </div>
+    </div>
+    <div id="phone-error" class="excl-error-msg"></div>
+    <button id="phone-submit-btn" class="excl-submit-btn" style="background:#00695c;">📞 กดเพื่อบันทึกเบอร์</button>`;
+
+  document.getElementById('phone-submit-btn').addEventListener('click', savePhoneRecord);
+}
+
+async function savePhoneRecord() {
+  const btn     = document.getElementById('phone-submit-btn');
+  const errorEl = document.getElementById('phone-error');
+  errorEl.style.display = 'none';
+
+  const phoneStatus = document.querySelector('input[name="phone-status"]:checked')?.value || '';
+  const phoneNumber = (document.getElementById('phone-number').value || '').trim();
+
+  const missing = [];
+  if (!phoneStatus) missing.push('สถานะเบอร์');
+  if (!phoneNumber) missing.push('เบอร์โทร');
+
+  if (missing.length) {
+    errorEl.textContent = 'กรุณากรอก: ' + missing.join(', ');
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = '⏳ กำลังบันทึก...';
+  btn.classList.add('saving');
+
+  const payload = {
+    type:         'PHONE',
+    timestamp:    new Date().toISOString(),
+    agentEmail:   currentResult?.agentEmail   || '',
+    creditUserId: currentResult?.creditUserId || '',
+    name:         currentResult?.name         || '',
+    phoneStatus,
+    phoneNumber,
+  };
+
+  try {
+    const res = await sendToBackground({ type: 'SEND_TO_SHEETS', url: PHONE_WEB_APP_URL, payload });
+    if (res && typeof res.rowsWritten === 'number' && res.rowsWritten === 0) {
+      throw new Error('Apps Script ไม่ได้บันทึกข้อมูล (rowsWritten=0)\nกรุณา Redeploy Apps Script ใหม่');
+    }
+    btn.textContent = '✅ บันทึกแล้ว';
+    btn.classList.remove('saving');
+    btn.classList.add('saved');
+    btn.style.background = '#2e7d32';
+  } catch (err) {
+    btn.disabled    = false;
+    btn.textContent = '📞 กดเพื่อบันทึกเบอร์';
+    btn.classList.remove('saving');
+    btn.style.background = '#00695c';
+    errorEl.textContent = '❌ บันทึกไม่สำเร็จ: ' + err.message;
+    errorEl.style.display = 'block';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Panel: SMS Trigger
+// ---------------------------------------------------------------------------
+function renderSmsPanel(result) {
+  const el = document.getElementById('sms-content');
+  const groups = result.allActiveGroups || [];
+
+  // Build product options — store productLabel → totalDue mapping via data-total
+  const productOptions = groups.length
+    ? groups.map(g => {
+        const label = g.productLabel || g.productType;
+        const total = g.totalDue != null ? g.totalDue : '';
+        return `<option value="${esc(label)}" data-total="${total}">${esc(label)}</option>`;
+      }).join('')
+    : '';
+
+  // Today's date as default for appointment
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+
+  el.innerHTML = `
+    <div class="sms-field">
+      <div class="sms-label">🏷️ เลือก Product</div>
+      <select id="sms-product" class="sms-select">
+        <option value="" data-total="">— เลือก Product —</option>
+        ${productOptions}
+      </select>
+    </div>
+    <div class="sms-field">
+      <div class="sms-label">🏦 ธนาคาร</div>
+      <select id="sms-bank" class="sms-select">
+        <option value="">— เลือกธนาคาร —</option>
+        <option value="ธนาคารกรุงเทพ">1 ธนาคารกรุงเทพ</option>
+        <option value="ธนาคารกสิกรไทย">2 ธนาคารกสิกรไทย</option>
+        <option value="ธนาคารกรุงไทย">3 ธนาคารกรุงไทย</option>
+        <option value="ธนาคารไทยพาณิชย์">4 ธนาคารไทยพาณิชย์</option>
+      </select>
+    </div>
+    <div class="sms-field">
+      <div class="sms-label">💳 ประเภทการชำระ</div>
+      <div style="display:flex;gap:8px;margin-bottom:6px;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;cursor:pointer;">
+          <input type="radio" name="sms-payment-type" value="Partial"> Partial
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;cursor:pointer;">
+          <input type="radio" name="sms-payment-type" value="Full amount"> Full amount
+        </label>
+      </div>
+      <div style="position:relative;">
+        <input type="number" id="sms-amount" class="sms-input" placeholder="ยอดชำระ (THB)" min="0" step="0.01">
+        <span id="sms-amount-hint" style="display:none;font-size:0.77rem;color:#1565c0;margin-top:2px;display:block;"></span>
+      </div>
+    </div>
+    <div class="sms-field">
+      <div class="sms-label">📅 วันที่นัดชำระ</div>
+      <input type="date" id="sms-appt-date" class="sms-input" value="${todayStr}">
+    </div>
+    <div class="sms-field">
+      <div class="sms-label">📱 เบอร์โทร</div>
+      <input type="tel" id="sms-phone" class="sms-input" placeholder="0XX-XXX-XXXX">
+    </div>
+    <div id="sms-error" class="excl-error-msg"></div>
+    <button id="sms-submit-btn" class="sms-submit-btn">💬 ส่ง SMS Trigger</button>`;
+
+  // ── Auto-fill amount when Full amount is selected or product changes ──────
+  function tryAutoFillAmount() {
+    const sel         = document.getElementById('sms-product');
+    const payType     = document.querySelector('input[name="sms-payment-type"]:checked')?.value;
+    const amountInput = document.getElementById('sms-amount');
+    const hint        = document.getElementById('sms-amount-hint');
+    if (payType === 'Full amount' && sel.value) {
+      const opt   = sel.options[sel.selectedIndex];
+      const total = opt.dataset.total;
+      if (total !== '') {
+        amountInput.value = total;
+        hint.textContent  = `✔ ดึงยอดค้างรวม ${Number(total).toLocaleString()} THB จาก ${sel.value}`;
+        hint.style.display = 'block';
+        return;
+      }
+    }
+    hint.style.display = 'none';
+    // Clear auto-filled value if switching away from Full amount
+    if (payType !== 'Full amount') amountInput.value = '';
+  }
+
+  document.getElementById('sms-product').addEventListener('change', tryAutoFillAmount);
+  document.querySelectorAll('input[name="sms-payment-type"]').forEach(r =>
+    r.addEventListener('change', tryAutoFillAmount)
+  );
+
+  document.getElementById('sms-submit-btn').addEventListener('click', saveSmsRecord);
+}
+
+async function saveSmsRecord() {
+  const btn     = document.getElementById('sms-submit-btn');
+  const errorEl = document.getElementById('sms-error');
+  errorEl.style.display = 'none';
+
+  const product     = document.getElementById('sms-product').value.trim();
+  const bank        = document.getElementById('sms-bank').value;
+  const paymentType = document.querySelector('input[name="sms-payment-type"]:checked')?.value || '';
+  const amount      = document.getElementById('sms-amount').value.trim();
+  const apptDate    = document.getElementById('sms-appt-date').value;
+  const phone       = document.getElementById('sms-phone').value.trim();
+
+  const missing = [];
+  if (!product)     missing.push('Product');
+  if (!bank)        missing.push('ธนาคาร');
+  if (!paymentType) missing.push('ประเภทการชำระ');
+  if (!amount)      missing.push('ยอดชำระ');
+  if (!apptDate)    missing.push('วันที่นัดชำระ');
+  if (!phone)       missing.push('เบอร์โทร');
+
+  if (missing.length) {
+    errorEl.textContent = 'กรุณากรอก: ' + missing.join(', ');
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  if (!SMS_WEB_APP_URL) {
+    errorEl.textContent = '❌ ยังไม่ได้ตั้งค่า SMS_WEB_APP_URL ใน config.js';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = '⏳ กำลังส่ง...';
+
+  const payload = {
+    type:         'SMS',
+    timestamp:    new Date().toISOString(),
+    agentEmail:   currentResult?.agentEmail   || '',
+    creditUserId: currentResult?.creditUserId || '',
+    name:         currentResult?.name         || '',
+    product,
+    bank,
+    paymentType,
+    amount,
+    apptDate,
+    phone,
+  };
+
+  try {
+    const res = await sendToBackground({ type: 'SEND_TO_SHEETS', url: SMS_WEB_APP_URL, payload });
+    if (res && typeof res.rowsWritten === 'number' && res.rowsWritten === 0) {
+      throw new Error('Apps Script ไม่ได้บันทึกข้อมูล (rowsWritten=0)\nกรุณา Redeploy Apps Script ใหม่');
+    }
+    btn.textContent = '✅ ส่งแล้ว';
+    btn.classList.add('saved');
+  } catch (err) {
+    btn.disabled    = false;
+    btn.textContent = '💬 ส่ง SMS Trigger';
+    btn.classList.remove('saved');
+    errorEl.textContent = '❌ บันทึกไม่สำเร็จ: ' + err.message;
+    errorEl.style.display = 'block';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Chrome helpers
 // ---------------------------------------------------------------------------
 function getActiveTab() {
   return new Promise(resolve => {
-    // Works for both popup mode and iframe (overlay) mode:
-    // - Popup mode: returns the tab that was active before the popup opened
-    // - Iframe mode: the iframe IS on the active tab, so this returns the same tab
+    // If opened as a detached window, tabId is passed via URL param
+    const urlTabId = new URLSearchParams(window.location.search).get('tabId');
+    if (urlTabId) {
+      chrome.tabs.get(parseInt(urlTabId, 10), tab => {
+        if (chrome.runtime.lastError) {
+          // Tab may have been closed; fall back to normal query
+          chrome.tabs.query({ active: true, lastFocusedWindow: true }, tabs => resolve(tabs[0] ?? null));
+        } else {
+          resolve(tab);
+        }
+      });
+      return;
+    }
+    // Normal popup mode: returns the tab that was active before the popup opened
+    // Iframe mode: the iframe IS on the active tab, so this returns the same tab
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
       resolve(tabs[0] ?? null);
     });
@@ -729,7 +1044,12 @@ function sendToBackground(message) {
 }
 
 function isCaseDetailPage(url) {
-  return /^https:\/\/collections\.scredit\.in\.th\/main\/case\/detail\//.test(url || '');
+  const u = url || '';
+  // /main/case/* — outbound case detail and related pages
+  if (/^https:\/\/collections\.scredit\.in\.th\/main\/case\//.test(u)) return true;
+  // /main/agentWorkstation/case/* — inbound call and agent workstation pages
+  if (/^https:\/\/collections\.scredit\.in\.th\/main\/agentWorkstation\/case\//.test(u)) return true;
+  return false;
 }
 
 // ---------------------------------------------------------------------------

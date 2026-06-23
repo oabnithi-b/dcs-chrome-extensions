@@ -4,12 +4,16 @@
   <meta charset="UTF-8" />
   <title>DC Collection Tool</title>
   <style>
+    html { font-size: 13px; }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      width: 420px;
+      width: 100%;
+      min-width: 320px;
+      overflow-x: hidden;
+      overflow-y: auto;
       font-family: 'Segoe UI', Tahoma, sans-serif;
-      font-size: 13px;
       background: #f0f2f5;
       color: #2c2c2c;
     }
@@ -19,7 +23,7 @@
       background: #1a237e;
       color: #fff;
       padding: 9px 14px;
-      font-size: 14px;
+      font-size: 1.077rem;
       font-weight: 700;
       display: flex;
       align-items: center;
@@ -27,12 +31,43 @@
       letter-spacing: 0.2px;
     }
     .header-phase {
-      font-size: 10px;
+      font-size: 0.769rem;
       font-weight: 400;
       background: rgba(255,255,255,0.18);
       border-radius: 10px;
       padding: 2px 8px;
       letter-spacing: 0.5px;
+    }
+    .font-size-group {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      background: rgba(255,255,255,0.12);
+      border-radius: 8px;
+      padding: 2px 3px;
+    }
+    .font-size-btn {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      color: rgba(255,255,255,0.65);
+      border-radius: 6px;
+      padding: 1px 5px;
+      line-height: 1;
+      transition: background 0.12s, color 0.12s;
+    }
+    .font-size-btn:nth-child(1) { font-size: 10px; font-weight: 600; padding: 1px 4px; }
+    .font-size-btn:nth-child(2) { font-size: 11px; font-weight: 700; }
+    .font-size-btn:nth-child(3) { font-size: 12px; font-weight: 700; }
+    .font-size-btn:nth-child(4) { font-size: 14px; font-weight: 700; padding: 1px 5px; }
+    .font-size-btn:nth-child(5) { font-size: 15px; font-weight: 700; padding: 1px 6px; }
+    .font-size-btn.active {
+      background: rgba(255,255,255,0.28);
+      color: #fff;
+    }
+    .font-size-btn:hover:not(.active) {
+      background: rgba(255,255,255,0.16);
+      color: rgba(255,255,255,0.9);
     }
 
     /* ─── Tool Tabs ─── */
@@ -48,7 +83,7 @@
       padding: 5px 13px;
       border-radius: 20px;
       border: 1.5px solid transparent;
-      font-size: 12px;
+      font-size: 0.923rem;
       font-weight: 600;
       cursor: pointer;
       white-space: nowrap;
@@ -68,9 +103,9 @@
       padding: 30px 16px;
       text-align: center;
     }
-    .state-wrong { color: #b71c1c; font-size: 13px; line-height: 1.6; }
-    .state-wrong small { color: #9e9e9e; font-size: 11px; }
-    .state-error { color: #b71c1c; font-size: 12px; line-height: 1.6; }
+    .state-wrong { color: #b71c1c;line-height: 1.6; }
+    .state-wrong small { color: #9e9e9e; font-size: 0.846rem; }
+    .state-error { color: #b71c1c; font-size: 0.923rem; line-height: 1.6; }
     .spinner {
       display: inline-block;
       width: 24px; height: 24px;
@@ -81,7 +116,7 @@
       margin-bottom: 10px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .loading-text { color: #5c6bc0; font-size: 13px; }
+    .loading-text { color: #5c6bc0; font-size: 1rem; }
 
     /* ─── Customer bar ─── */
     .customer-bar {
@@ -95,21 +130,17 @@
     }
     .customer-info { flex: 1; min-width: 0; }
     .customer-name {
-      font-weight: 700;
-      font-size: 13px;
-      color: #1a237e;
+      font-weight: 700;color: #1a237e;
       margin-bottom: 2px;
     }
-    .customer-ids { font-size: 11px; color: #555; }
-    .customer-agent { font-size: 11px; color: #9e9e9e; margin-top: 2px; }
+    .customer-ids { font-size: 0.846rem; color: #555; }
+    .customer-agent { font-size: 0.846rem; color: #9e9e9e; margin-top: 2px; }
     .id-sep { margin: 0 4px; color: #ccc; }
     .btn-refresh {
       background: transparent;
       border: 1px solid #c5cae9;
       border-radius: 6px;
-      padding: 4px 8px;
-      font-size: 13px;
-      cursor: pointer;
+      padding: 4px 8px;cursor: pointer;
       color: #5c6bc0;
       line-height: 1;
       flex-shrink: 0;
@@ -124,7 +155,7 @@
     /* ─── Section label ─── */
     .section-label {
       padding: 8px 12px 4px;
-      font-size: 10px;
+      font-size: 0.769rem;
       font-weight: 700;
       letter-spacing: 0.8px;
       text-transform: uppercase;
@@ -135,6 +166,31 @@
     .section-label.interest   { color: #6a1b9a; }
     .section-label.rl         { color: #4e342e; }
     .section-label.excl       { color: #6a1b9a; }
+    .section-label.phone      { color: #00695c; }
+    .section-label.sms        { color: #1565c0; }
+
+    /* ─── SMS Panel ─── */
+    .sms-field { margin-bottom: 10px; }
+    .sms-label { font-size: 0.846rem; font-weight: 600; color: #555; margin-bottom: 4px; }
+    .sms-select, .sms-input {
+      width: 100%; padding: 6px 8px;
+      border: 1px solid #ccc; border-radius: 6px;
+      font-size: 0.85rem; background: #fff;
+    }
+    .sms-select:focus, .sms-input:focus { border-color: #1565c0; outline: none; }
+    .sms-amount-row { display: flex; gap: 8px; align-items: flex-end; }
+    .sms-amount-row .sms-field { flex: 1; margin-bottom: 0; }
+    .sms-submit-btn {
+      width: 100%; padding: 9px;
+      background: #1565c0; color: #fff;
+      border: none; border-radius: 8px;
+      font-size: 0.923rem; font-weight: 700;
+      cursor: pointer; margin-top: 4px;
+      transition: background 0.15s;
+    }
+    .sms-submit-btn:hover:not(:disabled) { background: #0d47a1; }
+    .sms-submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .sms-submit-btn.saved { background: #2e7d32; }
 
     /* ─── Exclude form ─── */
     .excl-card {
@@ -150,7 +206,7 @@
     }
     .excl-field:last-of-type { border-bottom: none; }
     .excl-label {
-      font-size: 10px;
+      font-size: 0.769rem;
       font-weight: 700;
       color: #6a1b9a;
       text-transform: uppercase;
@@ -167,7 +223,7 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      font-size: 12px;
+      font-size: 0.923rem;
       cursor: pointer;
       padding: 3px 6px;
       border-radius: 5px;
@@ -184,7 +240,7 @@
       display: flex;
       align-items: center;
       gap: 5px;
-      font-size: 12px;
+      font-size: 0.923rem;
       padding: 4px 10px;
       border-radius: 14px;
       border: 1.5px solid #ce93d8;
@@ -203,7 +259,7 @@
       padding: 6px 8px;
       border: 1.5px solid #ce93d8;
       border-radius: 6px;
-      font-size: 12px;
+      font-size: 0.923rem;
       background: #fff;
       color: #2c2c2c;
       outline: none;
@@ -215,7 +271,7 @@
       padding: 6px 8px;
       border: 1.5px solid #ce93d8;
       border-radius: 6px;
-      font-size: 12px;
+      font-size: 0.923rem;
       background: #fff;
       color: #2c2c2c;
       outline: none;
@@ -227,7 +283,7 @@
       padding: 6px 8px;
       border: 1.5px solid #ce93d8;
       border-radius: 6px;
-      font-size: 12px;
+      font-size: 0.923rem;
       background: #f3e5f5;
       font-weight: 600;
       color: #4a148c;
@@ -242,9 +298,7 @@
       border-radius: 20px;
       border: none;
       background: #6a1b9a;
-      color: #fff;
-      font-size: 13px;
-      font-weight: 700;
+      color: #fff;font-weight: 700;
       cursor: pointer;
       letter-spacing: 0.3px;
     }
@@ -258,7 +312,7 @@
       padding: 6px 10px;
       background: #ffebee;
       border-radius: 6px;
-      font-size: 11px;
+      font-size: 0.846rem;
       color: #b71c1c;
       display: none;
     }
@@ -273,14 +327,14 @@
     }
     .rl-card-header {
       padding: 8px 12px 5px;
-      font-size: 12px;
+      font-size: 0.923rem;
       font-weight: 700;
       display: flex;
       align-items: center;
       gap: 6px;
     }
     .rl-card-meta {
-      font-size: 10px;
+      font-size: 0.769rem;
       font-weight: 400;
       color: #757575;
       margin-top: 1px;
@@ -294,17 +348,17 @@
 
     .rl-notice {
       padding: 10px 12px;
-      font-size: 12px;
+      font-size: 0.923rem;
       line-height: 1.55;
       border-top: 1px solid rgba(0,0,0,0.06);
     }
-    .rl-notice strong { display: block; font-size: 12px; margin-bottom: 3px; }
-    .rl-notice-sub    { font-size: 11px; color: #5d4037; margin-top: 4px; font-style: italic; }
+    .rl-notice strong { display: block; font-size: 0.923rem; margin-bottom: 3px; }
+    .rl-notice-sub    { font-size: 0.846rem; color: #5d4037; margin-top: 4px; font-style: italic; }
     .rl-dpd-badge {
       display: inline-block;
       padding: 1px 8px;
       border-radius: 10px;
-      font-size: 10px;
+      font-size: 0.769rem;
       font-weight: 700;
       margin-left: 4px;
     }
@@ -315,7 +369,7 @@
       margin-top: 7px;
       padding: 5px 14px;
       border-radius: 16px;
-      font-size: 11px;
+      font-size: 0.846rem;
       font-weight: 600;
       text-decoration: none;
       cursor: pointer;
@@ -338,7 +392,7 @@
     .rl-save-btn {
       padding: 5px 14px;
       border-radius: 16px;
-      font-size: 11px;
+      font-size: 0.846rem;
       font-weight: 700;
       border: none;
       cursor: pointer;
@@ -367,13 +421,11 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      font-weight: 700;
-      font-size: 13px;
-      color: #1b5e20;
+      font-weight: 700;color: #1b5e20;
     }
     .product-meta {
       margin-top: 3px;
-      font-size: 11px;
+      font-size: 0.846rem;
       color: #757575;
     }
     .card-total {
@@ -384,9 +436,9 @@
       background: #f5f5f5;
       border-bottom: 1px solid #eeeeee;
     }
-    .total-label { font-size: 11px; color: #757575; }
-    .total-value { font-size: 18px; font-weight: 700; color: #1a237e; }
-    .total-unit  { font-size: 12px; color: #5c6bc0; }
+    .total-label { font-size: 0.846rem; color: #757575; }
+    .total-value { font-size: 1.385rem; font-weight: 700; color: #1a237e; }
+    .total-unit  { font-size: 0.923rem; color: #5c6bc0; }
 
     /* ─── Zone table (Partial Payment) ─── */
     .zone-table {
@@ -396,7 +448,7 @@
     .zone-table thead tr { background: #f9f9f9; }
     .zone-table th {
       padding: 5px 10px;
-      font-size: 10px;
+      font-size: 0.769rem;
       font-weight: 700;
       color: #9e9e9e;
       letter-spacing: 0.6px;
@@ -433,13 +485,13 @@
     .zone-dot.yellow { background: #fb8c00; }
     .zone-dot.red    { background: #e53935; }
     .zone-name-cell  { display: flex; align-items: center; }
-    .zone-label      { font-weight: 600; font-size: 12px; }
+    .zone-label      { font-weight: 600; font-size: 0.923rem; }
     .zone-label.green  { color: #1b5e20; }
     .zone-label.yellow { color: #e65100; }
     .zone-label.red    { color: #b71c1c; }
     .dpd-badge {
       margin-left: 6px;
-      font-size: 9px;
+      font-size: 0.692rem;
       font-weight: 700;
       letter-spacing: 0.3px;
       background: #3949ab;
@@ -447,17 +499,17 @@
       border-radius: 4px;
       padding: 1px 5px;
     }
-    .pct-text    { font-size: 12px; color: #555; font-weight: 600; }
-    .pct-unavail { font-size: 11px; color: #ccc; }
-    .amt-text    { font-size: 13px; font-weight: 700; }
+    .pct-text    { font-size: 0.923rem; color: #555; font-weight: 600; }
+    .pct-unavail { font-size: 0.846rem; color: #ccc; }
+    .amt-text    {font-weight: 700; }
     .amt-text.green  { color: #2e7d32; }
     .amt-text.yellow { color: #e65100; }
     .amt-text.red    { color: #c62828; }
-    .amt-unavail { font-size: 11px; color: #ccc; font-style: italic; }
-    .amt-unit    { font-size: 11px; font-weight: 400; color: #9e9e9e; margin-left: 2px; }
+    .amt-unavail { font-size: 0.846rem; color: #ccc; font-style: italic; }
+    .amt-unit    { font-size: 0.846rem; font-weight: 400; color: #9e9e9e; margin-left: 2px; }
     .dpd-note {
       padding: 5px 10px 7px;
-      font-size: 10px;
+      font-size: 0.769rem;
       color: #5c6bc0;
       background: #f3f4fb;
       border-top: 1px solid #e8eaf6;
@@ -474,7 +526,7 @@
       border-bottom: 1px solid #ffe082;
     }
     .pcl-rec-label {
-      font-size: 11px;
+      font-size: 0.846rem;
       font-weight: 600;
       color: #e65100;
       margin-bottom: 4px;
@@ -487,18 +539,18 @@
       margin-bottom: 4px;
     }
     .pcl-rec-value {
-      font-size: 22px;
+      font-size: 1.692rem;
       font-weight: 800;
       color: #bf360c;
       line-height: 1;
     }
     .pcl-rec-unit {
-      font-size: 12px;
+      font-size: 0.923rem;
       font-weight: 500;
       color: #bf360c;
     }
     .pcl-rec-sub {
-      font-size: 10px;
+      font-size: 0.769rem;
       color: #795548;
       font-style: italic;
     }
@@ -506,7 +558,7 @@
     /* Step-down note */
     .pcl-note {
       padding: 6px 10px;
-      font-size: 11px;
+      font-size: 0.846rem;
       color: #1565c0;
       background: #e3f2fd;
       border-top: 1px solid #bbdefb;
@@ -516,7 +568,7 @@
     .zone-table td.col-appt { width: 72px; }
     .zone-table th.col-reduction,
     .zone-table td.col-reduction { text-align: center; width: 110px; }
-    .pcl-reduction      { font-size: 11px; font-weight: 600; color: #2e7d32; }
+    .pcl-reduction      { font-size: 0.846rem; font-weight: 600; color: #2e7d32; }
     .pcl-reduction.none { color: #bdbdbd; font-weight: 400; }
 
     /* ─── Ineligible card ─── */
@@ -530,11 +582,11 @@
       gap: 8px;
       align-items: flex-start;
     }
-    .ineligible-icon  { font-size: 14px; margin-top: 1px; }
+    .ineligible-icon  { font-size: 1.077rem; margin-top: 1px; }
     .ineligible-body  { flex: 1; }
-    .ineligible-name  { font-weight: 600; font-size: 12px; color: #9e9e9e; }
-    .ineligible-reason{ font-size: 11px; color: #bdbdbd; font-style: italic; margin-top: 2px; }
-    .ineligible-total { font-size: 11px; color: #9e9e9e; margin-top: 1px; }
+    .ineligible-name  { font-weight: 600; font-size: 0.923rem; color: #9e9e9e; }
+    .ineligible-reason{ font-size: 0.846rem; color: #bdbdbd; font-style: italic; margin-top: 2px; }
+    .ineligible-total { font-size: 0.846rem; color: #9e9e9e; margin-top: 1px; }
 
     /* ─── Discount tool ─── */
     .disc-card {
@@ -547,12 +599,10 @@
     .disc-header {
       padding: 8px 10px 6px;
       border-bottom: 1px solid #f0f0f0;
-      font-weight: 700;
-      font-size: 13px;
-      color: #1565c0;
+      font-weight: 700;color: #1565c0;
     }
     .disc-meta {
-      font-size: 11px;
+      font-size: 0.846rem;
       color: #757575;
       font-weight: 400;
       margin-top: 2px;
@@ -565,15 +615,15 @@
       background: #e3f2fd;
       border-bottom: 1px solid #bbdefb;
     }
-    .disc-total-label { font-size: 11px; color: #1565c0; }
-    .disc-total-value { font-size: 16px; font-weight: 700; color: #0d47a1; }
-    .disc-total-unit  { font-size: 11px; color: #5c6bc0; }
+    .disc-total-label { font-size: 0.846rem; color: #1565c0; }
+    .disc-total-value { font-size: 1.231rem; font-weight: 700; color: #0d47a1; }
+    .disc-total-unit  { font-size: 0.846rem; color: #5c6bc0; }
     .disc-waive-notice {
       margin: 0 0 2px;
       padding: 10px 12px;
       background: #fff8e1;
       border-top: 2px solid #f9a825;
-      font-size: 12px;
+      font-size: 0.923rem;
       color: #5d4037;
       line-height: 1.6;
     }
@@ -585,7 +635,7 @@
     .disc-table thead tr { background: #f5f9ff; }
     .disc-table th {
       padding: 4px 8px;
-      font-size: 10px;
+      font-size: 0.769rem;
       font-weight: 700;
       color: #9e9e9e;
       letter-spacing: 0.5px;
@@ -597,14 +647,14 @@
     .disc-table td {
       padding: 6px 8px;
       border-top: 1px solid #f0f4ff;
-      font-size: 12px;
+      font-size: 0.923rem;
       text-align: right;
     }
     .disc-table td:first-child { text-align: center; }
-    .disc-pct    { font-weight: 700; color: #1565c0; font-size: 12px; }
+    .disc-pct    { font-weight: 700; color: #1565c0; font-size: 0.923rem; }
     .disc-amt    { color: #e53935; }
-    .disc-actual { font-weight: 700; color: #1b5e20; font-size: 13px; }
-    .disc-unit   { font-size: 10px; color: #9e9e9e; margin-left: 2px; }
+    .disc-actual { font-weight: 700; color: #1b5e20;}
+    .disc-unit   { font-size: 0.769rem; color: #9e9e9e; margin-left: 2px; }
 
     /* M-based discount table overrides */
     .disc-m-table th.col-m,
@@ -618,7 +668,7 @@
       padding: 1px 5px;
       background: #2e7d32;
       color: #fff;
-      font-size: 9px;
+      font-size: 0.692rem;
       font-weight: 700;
       border-radius: 4px;
       vertical-align: middle;
@@ -635,11 +685,9 @@
     .int-header {
       padding: 8px 10px 6px;
       border-bottom: 1px solid #f0f0f0;
-      font-weight: 700;
-      font-size: 13px;
-      color: #6a1b9a;
+      font-weight: 700;color: #6a1b9a;
     }
-    .int-meta { font-size: 11px; color: #757575; font-weight: 400; margin-top: 2px; }
+    .int-meta { font-size: 0.846rem; color: #757575; font-weight: 400; margin-top: 2px; }
     .int-form {
       padding: 8px 10px;
     }
@@ -652,7 +700,7 @@
     .int-form-row label {
       width: 110px;
       flex-shrink: 0;
-      font-size: 11px;
+      font-size: 0.846rem;
       color: #555;
     }
     .int-form-row select,
@@ -661,7 +709,7 @@
       padding: 4px 7px;
       border: 1px solid #d0d0d0;
       border-radius: 5px;
-      font-size: 12px;
+      font-size: 0.923rem;
       color: #333;
       background: #fafafa;
       outline: none;
@@ -678,20 +726,20 @@
       background: #f3e5f5;
       border: 1px solid #ce93d8;
       min-height: 42px;
-      font-size: 12px;
+      font-size: 0.923rem;
     }
-    .int-hint { color: #9e9e9e; font-size: 11px; font-style: italic; }
+    .int-hint { color: #9e9e9e; font-size: 0.846rem; font-style: italic; }
     .ir-row { display: flex; align-items: baseline; gap: 6px; margin-bottom: 3px; }
     .ir-row:last-child { margin-bottom: 0; }
-    .ir-label { color: #555; font-size: 11px; flex: 1; }
-    .ir-val   { font-size: 14px; font-weight: 700; color: #4a148c; }
-    .ir-val.total { font-size: 16px; color: #6a1b9a; }
-    .ir-unit  { font-size: 11px; color: #9e9e9e; }
+    .ir-label { color: #555; font-size: 0.846rem; flex: 1; }
+    .ir-val   { font-size: 1.077rem; font-weight: 700; color: #4a148c; }
+    .ir-val.total { font-size: 1.231rem; color: #6a1b9a; }
+    .ir-unit  { font-size: 0.846rem; color: #9e9e9e; }
     .int-empty {
       padding: 20px 12px;
       text-align: center;
       color: #bdbdbd;
-      font-size: 12px;
+      font-size: 0.923rem;
     }
 
     /* ─── Divider ─── */
@@ -706,7 +754,7 @@
       color: #3949ab;
       border: 1px solid #3949ab;
       border-radius: 20px;
-      font-size: 12px;
+      font-size: 0.923rem;
       cursor: pointer;
     }
     .btn-retry:hover { background: #e8eaf6; }
@@ -714,19 +762,47 @@
     .no-data {
       padding: 12px;
       text-align: center;
-      font-size: 12px;
+      font-size: 0.923rem;
       color: #bdbdbd;
       font-style: italic;
     }
     .bottom-pad { height: 10px; }
+
+    /* ─── Open Overlay button (only visible in toolbar popup mode, hidden inside iframe) ─── */
+    #btn-open-overlay {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      color: rgba(255,255,255,0.75);
+      font-size: 13px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      line-height: 1.4;
+      white-space: nowrap;
+      transition: color 0.12s, background 0.12s;
+    }
+    #btn-open-overlay:hover { color: #fff; background: rgba(255,255,255,0.18); }
+    /* Hide when loaded inside overlay iframe */
+    body.in-iframe #btn-open-overlay { display: none !important; }
   </style>
 </head>
 <body>
 
 <!-- ── Header ── -->
+<div id="dc-zoom-root">
 <div class="header">
   <span>💼 DC Collection Tool</span>
-  <span class="header-phase">Phase 1</span>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div class="font-size-group">
+      <button class="font-size-btn" data-level="1" title="16px">A</button>
+      <button class="font-size-btn" data-level="2" title="17px">A</button>
+      <button class="font-size-btn" data-level="3" title="18px">A</button>
+      <button class="font-size-btn" data-level="4" title="19px">A</button>
+      <button class="font-size-btn" data-level="5" title="20px">A</button>
+    </div>
+    <button id="btn-open-overlay" title="เปิด D Tool บนหน้าเว็บ">📌 D Tool</button>
+    <span class="header-phase">Phase 1</span>
+  </div>
 </div>
 
 <!-- ── Tool tabs ── -->
@@ -736,6 +812,8 @@
   <button class="tool-tab"        data-tool="exclude">🚫 Exclude</button>
   <button class="tool-tab"        data-tool="rl">🔄 RL</button>
   <button class="tool-tab"        data-tool="interest">📊 ดอกเบี้ย</button>
+  <button class="tool-tab"        data-tool="phone">📞 ดึงเบอร์</button>
+  <button class="tool-tab"        data-tool="sms">💬 SMS</button>
 </div>
 
 <!-- ── State: wrong page ── -->
@@ -758,6 +836,11 @@
 
 <!-- ── State: result ── -->
 <div id="state-result" style="display:none">
+
+  <!-- Inbound call cache banner — shown only when live extraction failed -->
+  <div id="cache-banner" style="display:none;background:#e65100;color:#fff;font-size:0.77rem;padding:5px 10px;text-align:center;line-height:1.4;">
+    📞 มีสายโทรเข้า — แสดงข้อมูลก่อนมีสาย &nbsp;|&nbsp; กด 🔄 หลังวางสายเพื่ออัปเดต
+  </div>
 
   <!-- Customer info bar with refresh button -->
   <div class="customer-bar">
@@ -809,11 +892,25 @@
     <div id="rl-content"></div>
   </div>
 
+  <!-- ── TOOL PANEL: ดึงเบอร์ ── -->
+  <div id="panel-phone" class="tool-panel">
+    <div class="section-label phone">📞 ดึงเบอร์</div>
+    <div id="phone-content"></div>
+  </div>
+
+  <!-- ── SMS Trigger panel ── -->
+  <div id="panel-sms" class="tool-panel">
+    <div class="section-label sms">💬 SMS Trigger</div>
+    <div id="sms-content" style="padding:10px 12px;"></div>
+  </div>
+
   <div class="bottom-pad"></div>
 </div>
+</div><!-- /#dc-zoom-root -->
 
 <script src="config.js"></script>
 <script src="eligibility.js"></script>
 <script src="popup.js"></script>
+<script src="font-control.js"></script>
 </body>
 </html>

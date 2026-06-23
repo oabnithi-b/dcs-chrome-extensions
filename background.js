@@ -15,9 +15,16 @@
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.type === 'SEND_TO_SHEETS') {
+    console.log('[DC] SEND_TO_SHEETS →', request.payload?.type, request.payload);
     fetchSheets(request.url, request.payload)
-      .then(data => sendResponse({ ok: true, data }))
-      .catch(err  => sendResponse({ ok: false, error: err.message }));
+      .then(data => {
+        console.log('[DC] Apps Script response ←', data);
+        sendResponse({ ok: true, data });
+      })
+      .catch(err  => {
+        console.error('[DC] fetchSheets error ←', err.message);
+        sendResponse({ ok: false, error: err.message });
+      });
     return true; // keep message channel open for async response
   }
 });

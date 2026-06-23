@@ -20,6 +20,10 @@ const RL_TAB     = 'DR Extension'; // Restructure Loan save log
 const EXCLUDE_SPREADSHEET_ID = '1_a-JedcXKsQDk2f1Lq14xJNmLTkZnFLiAhjMsvYvvzw';
 const EXCLUDE_TAB             = 'Exclude Extension';
 
+// Phone spreadsheet
+const PHONE_SPREADSHEET_ID = '1EmsGIH_G7ZzgHrkspXEKHTpgtCCfkj-cGTjyKq7a0Ts';
+const PHONE_TAB            = 'DC tool extension';
+
 // ---------------------------------------------------------------------------
 // Column headers
 // ---------------------------------------------------------------------------
@@ -62,8 +66,18 @@ const EXCLUDE_HEADERS = [
   'ประเภท Exclude',
   'สาเหตุ',
   'สถานะนัดชำระ',
+  'ยอดนัดชำระ',
   'Delinquent',
   'Next Calling Date',
+];
+
+const PHONE_HEADERS = [
+  'Date',
+  'Agent Email',
+  'Credit User ID',
+  'Name',
+  'สถานะเบอร์',
+  'เบอร์โทร',
 ];
 
 // ---------------------------------------------------------------------------
@@ -81,6 +95,11 @@ function doPost(e) {
 
     if (payload.type === 'EXCLUDE') {
       const rowsWritten = writeExcludePayload(payload);
+      return jsonResponse({ status: 'ok', rowsWritten });
+    }
+
+    if (payload.type === 'PHONE') {
+      const rowsWritten = writePhonePayload(payload);
       return jsonResponse({ status: 'ok', rowsWritten });
     }
 
@@ -125,7 +144,7 @@ function writePartialPayload(payload) {
 
 function buildPartialRow(payload, product) {
   return [
-    payload.timestamp        || new Date().toISOString(),
+    toThaiDateTime(payload.timestamp),
     payload.agentEmail       || '',
     payload.creditUserId     || '',
     payload.name             || '',
@@ -161,7 +180,7 @@ function writeRLPayload(payload) {
 
 function buildRLRow(payload) {
   return [
-    payload.timestamp    || new Date().toISOString(),
+    toThaiDateTime(payload.timestamp),
     payload.agentEmail   || '',
     payload.creditUserId || '',
     payload.name         || '',
@@ -189,7 +208,7 @@ function writeExcludePayload(payload) {
 
 function buildExcludeRow(payload) {
   return [
-    payload.timestamp      || new Date().toISOString(),
+    toThaiDateTime(payload.timestamp),
     payload.agentEmail     || '',
     payload.creditUserId   || '',
     payload.name           || '',
@@ -199,8 +218,36 @@ function buildExcludeRow(payload) {
     payload.excludeType    || '',
     payload.reason         || '',
     payload.appointStatus  || '',
+    payload.ptpAmount      || '',
     payload.delinquent     || '',
     payload.nextCallingDate|| '',
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Phone — write to DC tool extension tab (Phone spreadsheet)
+// ---------------------------------------------------------------------------
+function writePhonePayload(payload) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ss  = SpreadsheetApp.openById(PHONE_SPREADSHEET_ID);
+    const tab = findOrCreateTab(ss, PHONE_TAB, PHONE_HEADERS);
+    appendRow(tab, PHONE_HEADERS, buildPhoneRow(payload));
+    return 1;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function buildPhoneRow(payload) {
+  return [
+    toThaiDateTime(payload.timestamp),
+    payload.agentEmail   || '',
+    payload.creditUserId || '',
+    payload.name         || '',
+    payload.phoneStatus  || '',
+    payload.phoneNumber  || '',
   ];
 }
 
@@ -221,13 +268,38 @@ function findOrCreateTab(ss, name, headers) {
 }
 
 function appendRow(sheet, headers, row) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow === 0) {
-    sheet.appendRow(headers);
+  // Use column A to find the last row that actually has data.
+  // sheet.getLastRow() counts rows with formatting too, which causes new rows
+  // to be written far below the visible data when the sheet has phantom formatting.
+  const colA      = sheet.getRange('A:A').getValues();
+  let lastDataRow = 0;
+  for (let i = 0; i < colA.length; i++) {
+    if (colA[i][0] !== '') lastDataRow = i + 1;
+  }
+
+  if (lastDataRow === 0) {
+    // Sheet is empty — write headers first
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    lastDataRow = 1;
   }
-  sheet.appendRow(row);
+
+  // Write data directly after last real row (no phantom-row gap)
+  sheet.getRange(lastDataRow + 1, 1, 1, row.length).setValues([row]);
+}
+
+// ---------------------------------------------------------------------------
+// Date helper — ISO timestamp → "yyyy-mm-dd hh:mm" (Thailand UTC+7)
+// ---------------------------------------------------------------------------
+function toThaiDateTime(isoString) {
+  const d = new Date(new Date(isoString || Date.now()).getTime() + 7 * 60 * 60 * 1000);
+  const yyyy = d.getUTCFullYear();
+  const mo   = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd   = String(d.getUTCDate()).padStart(2, '0');
+  const hh   = String(d.getUTCHours()).padStart(2, '0');
+  const mi   = String(d.getUTCMinutes()).padStart(2, '0');
+  return yyyy + '-' + mo + '-' + dd + ' ' + hh + ':' + mi;
 }
 
 // ---------------------------------------------------------------------------

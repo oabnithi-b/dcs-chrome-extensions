@@ -13,7 +13,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://collections.scredit.in.th/main/case/detail/*"],
+      "matches": [
+        "https://collections.scredit.in.th/main/case/*",
+        "https://collections.scredit.in.th/main/agentWorkstation/case/*"
+      ],
       "js": ["config.js", "eligibility.js", "content.js", "overlay.js"]
     }
   ],
