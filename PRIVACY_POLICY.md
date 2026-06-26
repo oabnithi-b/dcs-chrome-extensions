@@ -1,4 +1,4 @@
-# Privacy Policy — DC Collection Tool (Chrome Extension)
+# Privacy Policy — DCs Collection Tool (Chrome Extension)
 
 **Effective Date:** June 2026  
 **Last Updated:** June 2026  
@@ -8,7 +8,7 @@
 
 ## Overview
 
-The **DC Collection Tool** is a Chrome Extension developed and operated by **Monee** for exclusive use by authorized Monee employees. This extension is not available to the general public. By using this extension, you acknowledge that you are an authorized Monee employee and agree to this policy.
+The **DCs Collection Tool** is a Chrome Extension developed and operated by **Monee** for exclusive use by authorized Monee employees. This extension is not available to the general public. By using this extension, you acknowledge that you are an authorized Monee employee and agree to this policy.
 
 ---
 
