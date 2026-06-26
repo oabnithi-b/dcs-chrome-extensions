@@ -86,22 +86,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // ── Google Auth check ─────────────────────────────────────────────────────
-  // ลองตรวจ token cache ก่อน (interactive: false) — ไม่แสดง Google popup อัตโนมัติ
   showState('auth');
   const loginUrl = (typeof LOGIN_WEB_APP_URL !== 'undefined') ? LOGIN_WEB_APP_URL : '';
 
-  try {
-    const authResult = await sendToBackground({ type: 'CHECK_AUTH', loginUrl, interactive: false });
-    verifiedEmail = authResult.email;
-    verifiedRole  = authResult.role || 'agent';
+  async function applyAuth(email, role) {
+    verifiedEmail = email;
+    verifiedRole  = role || 'agent';
     applyWatermark(verifiedEmail);
     applyAdminTab(verifiedRole);
     const btnLogout = document.getElementById('btn-logout');
     if (btnLogout) btnLogout.style.display = '';
+    // warmup scripts ทันทีเมื่อ auth สำเร็จ (ก่อน user กดปุ่ม)
+    warmup(typeof REQUEST_DISCOUNT_WEB_APP_URL !== 'undefined' ? REQUEST_DISCOUNT_WEB_APP_URL : '');
+    warmup(typeof WRONG_PTP_WEB_APP_URL !== 'undefined' ? WRONG_PTP_WEB_APP_URL : '');
+    warmup(typeof HASHTAG_WEB_APP_URL   !== 'undefined' ? HASHTAG_WEB_APP_URL   : '');
+    warmup(typeof INBOUND_WEB_APP_URL   !== 'undefined' ? INBOUND_WEB_APP_URL   : '');
     await runAnalysis();
+  }
+
+  // ── Fast path ตรง: อ่าน storage ใน popup โดยตรง ไม่ผ่าน background ──────────
+  // service worker อาจถูก kill อยู่ — การอ่าน storage ตรงเร็วกว่า (~50ms vs ~2s)
+  try {
+    const stored = await chrome.storage.local.get('dc_session');
+    const sess   = stored.dc_session || {};
+    if (sess.email && sess.role) {
+      // session ยังใช้ได้ → ข้ามการยืนยันตัวตน ไปแสดงผลเลย
+      await applyAuth(sess.email, sess.role);
+      return; // ออกจาก DOMContentLoaded
+    }
+  } catch (_) {}
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // session หมดอายุ / ยังไม่เคย login → ผ่าน background (เพื่อ Google OAuth)
+  async function doAuth(interactive) {
+    const authResult = await sendToBackground({ type: 'CHECK_AUTH', loginUrl, interactive });
+    await applyAuth(authResult.email, authResult.role);
+  }
+
+  try {
+    await doAuth(false); // silent ก่อน
   } catch (_) {
-    // ไม่มี token cache — แสดงปุ่มให้ user กดเองแทนการ popup อัตโนมัติ
-    showLoginPrompt(loginUrl);
+    try {
+      await doAuth(true); // interactive ถ้า silent ไม่ผ่าน
+    } catch (err) {
+      showLoginPrompt(loginUrl);
+    }
   }
 });
 
@@ -161,8 +190,10 @@ function showLoginPrompt(loginUrl) {
 }
 
 // ---------------------------------------------------------------------------
-// Tool switching
+// Tool switching — lazy render: วาด panel เฉพาะตอนที่ user click tab นั้น
 // ---------------------------------------------------------------------------
+const _renderedPanels = new Set();
+
 function switchTool(toolId) {
   currentTool = toolId;
   document.querySelectorAll('.tool-tab[data-tool]').forEach(t => {
@@ -174,6 +205,31 @@ function switchTool(toolId) {
   // ซ่อน customer-bar เมื่ออยู่ที่ tab admin
   const bar = document.querySelector('.customer-bar');
   if (bar) bar.style.display = (toolId === 'admin') ? 'none' : '';
+
+  // Lazy render — วาดเฉพาะ panel ที่ยังไม่เคยวาด (ถ้ามีข้อมูลแล้ว)
+  if (currentResult && !_renderedPanels.has(toolId)) {
+    _renderPanel(toolId, currentResult);
+    _renderedPanels.add(toolId);
+  }
+}
+
+function _renderPanel(toolId, result) {
+  const groups = result.allActiveGroups || [];
+  switch (toolId) {
+    case 'partial':   renderPartialPanel(result);          break;
+    case 'discount':  renderDiscountPanel(groups);          break;
+    case 'rdiscount': renderRequestDiscountPanel(result);   break;
+    case 'exclude':   renderExcludePanel(groups);           break;
+    case 'rl':        renderRLPanel(groups);                 break;
+    case 'interest':  renderInterestPanel(groups);          break;
+    case 'phone':     renderPhonePanel(result);              break;
+    case 'sms':       renderSmsPanel(result);                break;
+    case 'waive':     renderWaivePanel(result);              break;
+    case 'refund':    renderRefundPanel(result);             break;
+    case 'wrongptp':  renderWrongPTPPanel(result);           break;
+    case 'hashtag':   renderHashtagPanel(result);            break;
+    case 'inbound':   renderInboundPanel(result);            break;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +303,7 @@ async function runAnalysis() {
 }
 
 // ---------------------------------------------------------------------------
-// Master render — populates all three tool panels at once
+// Master render — อัปเดต customer bar แล้ว render เฉพาะ panel ที่ active
 // ---------------------------------------------------------------------------
 function renderResult(result) {
   // Show/hide inbound-call cache banner
@@ -259,9 +315,15 @@ function renderResult(result) {
   setText('r-shopeeId',result.shopeeUserId || '—');
   setText('r-agent',   result.agentEmail   || '—');
 
-  currentResult = result; // store for RL save button access
+  currentResult = result; // store for RL save + lazy render
+
+  // reset lazy-render cache เมื่อข้อมูลใหม่เข้ามา
+  _renderedPanels.clear();
+
+  // render ทุก panel ทันที
   renderPartialPanel(result);
   renderDiscountPanel(result.allActiveGroups || []);
+  renderRequestDiscountPanel(result);
   renderExcludePanel(result.allActiveGroups || []);
   renderRLPanel(result.allActiveGroups || []);
   renderInterestPanel(result.allActiveGroups || []);
@@ -269,9 +331,16 @@ function renderResult(result) {
   renderSmsPanel(result);
   renderWaivePanel(result);
   renderRefundPanel(result);
+  renderWrongPTPPanel(result);
+  renderHashtagPanel(result);
+  renderInboundPanel(result);
+
+  // mark ทุก panel ว่า render แล้ว
+  ['partial','discount','rdiscount','exclude','rl','interest','phone','sms','waive','refund','wrongptp','hashtag','inbound']
+    .forEach(t => _renderedPanels.add(t));
 
   showState('result');
-  switchTool(currentTool); // keep whichever tab was last active
+  switchTool(currentTool);
 }
 
 // ---------------------------------------------------------------------------
@@ -653,8 +722,8 @@ async function saveExcludeRecord(groups) {
     nextCallingDate,
   };
 
-  // ส่งข้อมูลใน background — ถ้า error แสดงเตือนเบาๆ ด้านล่าง
-  sendToBackground({ type: 'SEND_TO_SHEETS', url: EXCLUDE_WEB_APP_URL, payload })
+  // ส่งข้อมูลตรงจาก popup — ถ้า error แสดงเตือนเบาๆ ด้านล่าง
+  sheetsFetch(EXCLUDE_WEB_APP_URL, payload)
     .catch(err => {
       errorEl.textContent = '⚠️ บันทึกอาจไม่สำเร็จ: ' + err.message + ' (กรุณากด refresh แล้วลองใหม่)';
       errorEl.style.display = 'block';
@@ -777,7 +846,7 @@ async function saveRLRecord(group, btn) {
   };
 
   try {
-    const res = await sendToBackground({ type: 'SEND_TO_SHEETS', url: WEB_APP_URL, payload });
+    const res = await sheetsFetch(WEB_APP_URL, payload);
     // rowsWritten === 0 means Apps Script returned ok but wrote nothing —
     // most likely cause: old deployment without RL routing. Show error so
     // the user knows to redeploy rather than silently showing "saved".
@@ -934,7 +1003,7 @@ async function savePhoneRecord() {
   };
 
   try {
-    const res = await sendToBackground({ type: 'SEND_TO_SHEETS', url: PHONE_WEB_APP_URL, payload });
+    const res = await sheetsFetch(PHONE_WEB_APP_URL, payload);
     if (res && typeof res.rowsWritten === 'number' && res.rowsWritten === 0) {
       throw new Error('Apps Script ไม่ได้บันทึกข้อมูล (rowsWritten=0)\nกรุณา Redeploy Apps Script ใหม่');
     }
@@ -1096,7 +1165,7 @@ async function saveSmsRecord() {
   };
 
   try {
-    const res = await sendToBackground({ type: 'SEND_TO_SHEETS', url: SMS_WEB_APP_URL, payload });
+    const res = await sheetsFetch(SMS_WEB_APP_URL, payload);
     if (res && typeof res.rowsWritten === 'number' && res.rowsWritten === 0) {
       throw new Error('Apps Script ไม่ได้บันทึกข้อมูล (rowsWritten=0)\nกรุณา Redeploy Apps Script ใหม่');
     }
@@ -1107,6 +1176,490 @@ async function saveSmsRecord() {
     btn.textContent = '💬 ส่ง SMS Trigger';
     btn.classList.remove('saved');
     errorEl.textContent = '❌ บันทึกไม่สำเร็จ: ' + err.message;
+    errorEl.style.display = 'block';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Draft auto-save system
+// Key: draft_{caseId}_{panelId}  → scoped per case, resets when case changes
+// ---------------------------------------------------------------------------
+function _draftKey(panelId) {
+  return 'draft_' + (currentResult?.caseId || 'x') + '_' + panelId;
+}
+
+// บันทึกค่าทุก input/select/textarea ใน container
+function _saveDraft(panelId, containerId) {
+  const wrap = document.getElementById(containerId);
+  if (!wrap) return;
+  const data = {};
+  wrap.querySelectorAll('input,select,textarea').forEach(el => {
+    if (el.id) data[el.id] = el.value;
+  });
+  chrome.storage.local.set({ [_draftKey(panelId)]: data });
+}
+
+// โหลด draft จาก storage
+function _loadDraft(panelId) {
+  return new Promise(resolve => {
+    chrome.storage.local.get(_draftKey(panelId), r =>
+      resolve(r[_draftKey(panelId)] || null)
+    );
+  });
+}
+
+// ลบ draft (เรียกหลัง submit สำเร็จ)
+function _clearDraft(panelId) {
+  chrome.storage.local.remove(_draftKey(panelId));
+}
+
+// คืนค่า draft ลง DOM แล้ว trigger change บน select เพื่ออัปเดต conditional fields
+function _applyDraft(data) {
+  if (!data) return;
+  Object.entries(data).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val;
+  });
+  // trigger change บน select ให้ conditional visibility ทำงาน
+  Object.keys(data).forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.tagName === 'SELECT') {
+      el.dispatchEvent(new Event('change'));
+    }
+  });
+}
+
+// ผูก event delegation บน container → auto-save ทุก field change
+function _wireDraft(panelId, containerId) {
+  const wrap = document.getElementById(containerId);
+  if (!wrap) return;
+  const save = () => _saveDraft(panelId, containerId);
+  wrap.addEventListener('input',  save);
+  wrap.addEventListener('change', save);
+}
+
+// ---------------------------------------------------------------------------
+// Panel: Request Discount
+// ---------------------------------------------------------------------------
+function renderRequestDiscountPanel(result) {
+  warmup(typeof REQUEST_DISCOUNT_WEB_APP_URL !== 'undefined' ? REQUEST_DISCOUNT_WEB_APP_URL : '');
+  const el     = document.getElementById('rdiscount-content');
+  const groups = result.allActiveGroups || [];
+
+  const today    = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+
+  const productOptions = groups.length
+    ? groups.map(g => {
+        const label    = g.productLabel || g.productType;
+        const dpd      = g.maxDaysPastDue != null ? g.maxDaysPastDue : 0;
+        const M        = dpd > 0 ? Math.ceil(dpd / 30) : 0;
+        const totalDue = g.totalDue || 0;
+        const dueFull  = (g.bills || []).map(b => b.dueDate).filter(d => d).sort().reverse()[0] || '';
+        return `<option value="${esc(label)}" data-type="${esc(g.productType)}" data-dpd="${dpd}" data-m="${M}" data-total="${totalDue}" data-due="${esc(dueFull)}">${esc(label)}</option>`;
+      }).join('')
+    : '';
+
+  el.innerHTML = `
+    <div class="sms-field">
+      <div class="sms-label">📋 จำนวนงวด</div>
+      <select id="rd-installments" class="sms-select">
+        <option value="1" selected>1 งวด</option>
+        <option value="2">2 งวด</option>
+        <option value="3">3 งวด</option>
+      </select>
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">🏷️ Product</div>
+      <select id="rd-product" class="sms-select">
+        <option value="" data-type="" data-dpd="0" data-m="0" data-total="0" data-due="">— เลือก Product —</option>
+        ${productOptions}
+      </select>
+    </div>
+
+    <div id="rd-product-info" style="display:none;margin-bottom:6px;">
+      <div style="background:#e8eaf6;border-radius:6px;padding:8px 12px;font-size:0.85rem;line-height:2;">
+        <div>💰 ยอดค้างรวม: <strong id="rd-total-display" style="color:#1a237e;font-size:1rem;">—</strong> <span style="color:#666;">THB</span></div>
+        <div>📊 จำนวน M ค้างชำระ: <strong id="rd-m-display" style="color:#5c6bc0;">—</strong>&nbsp;&nbsp;|&nbsp;&nbsp;DPD: <strong id="rd-dpd-display" style="color:#5c6bc0;">—</strong> วัน</div>
+        <div>🔖 ส่วนลดสูงสุด (ตามเกณฑ์): <strong id="rd-maxpct-display" style="color:#2e7d32;">—</strong></div>
+      </div>
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">💵 ยอดที่นัดชำระ (THB)</div>
+      <input type="number" id="rd-promised" class="sms-input" placeholder="ระบุยอดนัดชำระ" min="0" step="0.01">
+    </div>
+
+    <div id="rd-rate-wrap" style="display:none;margin:2px 0 10px 0;">
+      <div style="background:#f5f5f5;border-radius:6px;padding:10px 14px;">
+        <div style="text-align:center;margin-bottom:6px;">
+          <span style="color:#555;font-size:0.85rem;">Discount Rate: </span>
+          <strong id="rd-rate-value" style="font-size:1.15rem;">—</strong>
+        </div>
+        <div id="rd-per-install-wrap" style="display:none;background:#fff;border-radius:5px;padding:6px 10px;margin-bottom:6px;text-align:center;border:1px solid #e0e0e0;">
+          <span style="color:#555;font-size:0.82rem;">💳 ยอดชำระต่องวด: </span>
+          <strong id="rd-per-install-value" style="color:#1a237e;font-size:1rem;">—</strong>
+          <span style="color:#666;font-size:0.82rem;"> THB/งวด</span>
+        </div>
+        <div id="rd-rate-status" style="font-size:0.82rem;text-align:center;"></div>
+      </div>
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label" id="rd-appt-label">📅 วันที่นัดชำระ</div>
+      <input type="date" id="rd-appt-date" class="sms-input" value="${todayStr}">
+    </div>
+
+    <!-- ยอดชำระงวดแรก (แสดงเฉพาะเมื่อเลือก 2-3 งวด) -->
+    <div class="sms-field" id="rd-inst1-wrap" style="display:none;">
+      <div class="sms-label">💵 ยอดชำระงวดแรก (THB) <span style="color:#b71c1c;">*</span></div>
+      <input type="number" id="rd-inst1-amount" class="sms-input" placeholder="ระบุยอดชำระงวดแรก" min="0" step="0.01">
+    </div>
+
+    <!-- ตารางสรุปงวด (แสดงเฉพาะเมื่อเลือก 2-3 งวด) -->
+    <div id="rd-installment-table" style="display:none;margin-bottom:10px;">
+      <div style="background:#e8eaf6;border-radius:8px;padding:10px 12px;">
+        <div style="font-weight:bold;color:#1a237e;font-size:0.85rem;margin-bottom:8px;">📋 สรุปยอดชำระแต่ละงวด</div>
+
+        <!-- งวดที่ 2 -->
+        <div id="rd-inst2-section" style="border-top:1px solid #c5cae9;padding-top:8px;margin-top:4px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <strong style="color:#3949ab;font-size:0.85rem;">งวดที่ 2</strong>
+            <span style="color:#1a237e;font-size:0.9rem;">💰 <strong id="rd-inst2-amount">—</strong> THB</span>
+          </div>
+          <div class="sms-field" style="margin:0;">
+            <div class="sms-label" style="font-size:0.8rem;">📅 วันที่นัดชำระ งวดที่ 2</div>
+            <input type="date" id="rd-inst2-date" class="sms-input">
+          </div>
+        </div>
+
+        <!-- งวดที่ 3 (แสดงเฉพาะ 3 งวด) -->
+        <div id="rd-inst3-section" style="display:none;border-top:1px solid #c5cae9;padding-top:8px;margin-top:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <strong style="color:#3949ab;font-size:0.85rem;">งวดที่ 3</strong>
+            <span style="color:#1a237e;font-size:0.9rem;">💰 <strong id="rd-inst3-amount">—</strong> THB</span>
+          </div>
+          <div class="sms-field" style="margin:0;">
+            <div class="sms-label" style="font-size:0.8rem;">📅 วันที่นัดชำระ งวดที่ 3</div>
+            <input type="date" id="rd-inst3-date" class="sms-input">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">🏢 สินเชื่อ SME พ่วง</div>
+      <select id="rd-sme" class="sms-select">
+        <option value="ไม่มี" selected>ไม่มี</option>
+        <option value="มี SME พ่วง">มี SME พ่วง</option>
+      </select>
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">📝 Remark <span style="color:#9e9e9e;font-size:0.8rem;">(ไม่บังคับ)</span></div>
+      <textarea id="rd-remark" class="sms-input" rows="2" placeholder="หมายเหตุเพิ่มเติม..." style="resize:vertical;min-height:50px;"></textarea>
+    </div>
+
+    <div id="rd-error" class="excl-error-msg"></div>
+    <button id="rd-submit-btn" class="sms-submit-btn" style="background:#e65100;">📋 ส่ง Request Discount</button>`;
+
+  // helper: refresh maxPct display ใน product-info
+  function _rdRefreshMaxPct() {
+    const productSel = document.getElementById('rd-product');
+    if (!productSel?.value) return;
+    const opt    = productSel.options[productSel.selectedIndex];
+    const M      = parseInt(opt.dataset.m)   || 0;
+    const pType  = opt.dataset.type || productSel.value;
+    const inst   = parseInt(document.getElementById('rd-installments')?.value) || 1;
+    const maxPct = _rdMaxPct(pType, M, inst);
+    document.getElementById('rd-maxpct-display').textContent =
+      maxPct != null ? maxPct + '%' : 'ไม่มีเกณฑ์ (M < 7)';
+    document.getElementById('rd-maxpct-display').style.color =
+      maxPct != null ? '#2e7d32' : '#9e9e9e';
+  }
+
+  // event: เลือก product
+  document.getElementById('rd-product').addEventListener('change', function () {
+    const opt      = this.options[this.selectedIndex];
+    const totalDue = parseFloat(opt.dataset.total) || 0;
+    const dpd      = parseInt(opt.dataset.dpd)     || 0;
+    const M        = parseInt(opt.dataset.m)        || 0;
+    const pType    = opt.dataset.type || this.value;
+    const inst     = parseInt(document.getElementById('rd-installments')?.value) || 1;
+
+    if (this.value) {
+      document.getElementById('rd-product-info').style.display = '';
+      document.getElementById('rd-total-display').textContent  = fmt(totalDue);
+      document.getElementById('rd-m-display').textContent      = M  ? 'M' + M  : '—';
+      document.getElementById('rd-dpd-display').textContent    = dpd ? dpd     : '—';
+      const maxPct = _rdMaxPct(pType, M, inst);
+      document.getElementById('rd-maxpct-display').textContent =
+        maxPct != null ? maxPct + '%' : 'ไม่มีเกณฑ์ (M < 7)';
+      document.getElementById('rd-maxpct-display').style.color =
+        maxPct != null ? '#2e7d32' : '#9e9e9e';
+    } else {
+      document.getElementById('rd-product-info').style.display = 'none';
+      document.getElementById('rd-rate-wrap').style.display    = 'none';
+    }
+    _rdUpdateRate();
+  });
+
+  // event: เปลี่ยนจำนวนงวด → คำนวณใหม่ + refresh maxPct + reset dates
+  document.getElementById('rd-installments').addEventListener('change', function () {
+    _rdRefreshMaxPct();
+    _rdUpdateRate();
+    _rdUpdateInstallments(true);
+  });
+
+  // event: กรอก ยอดนัดชำระ
+  document.getElementById('rd-promised').addEventListener('input', function () {
+    _rdUpdateRate();
+    _rdUpdateInstallments(false);
+  });
+
+  // event: เปลี่ยนวันที่นัดชำระงวด 1 → reset default dates งวด 2-3
+  document.getElementById('rd-appt-date').addEventListener('change', function () {
+    _rdUpdateInstallments(true);
+  });
+
+  // event: กรอกยอดชำระงวดแรก → คำนวณยอดงวดที่เหลือ
+  document.getElementById('rd-inst1-amount').addEventListener('input', function () {
+    _rdUpdateInstallments(false);
+  });
+
+  document.getElementById('rd-submit-btn').addEventListener('click', saveRequestDiscountRecord);
+
+  // draft: wire auto-save แล้ว restore
+  _wireDraft('rd', 'rdiscount-content');
+  _loadDraft('rd').then(_applyDraft);
+}
+
+// helper: คำนวณ discount rate แล้ว update UI
+function _rdUpdateRate() {
+  const productSel  = document.getElementById('rd-product');
+  const opt         = productSel ? productSel.options[productSel.selectedIndex] : null;
+  const totalDue    = parseFloat(opt?.dataset?.total)  || 0;
+  const M           = parseInt(opt?.dataset?.m)         || 0;
+  const pType       = opt?.dataset?.type || productSel?.value || '';
+  const promised    = parseFloat(document.getElementById('rd-promised')?.value) || 0;
+  const inst        = parseInt(document.getElementById('rd-installments')?.value) || 1;
+  const wrap        = document.getElementById('rd-rate-wrap');
+  const rateEl      = document.getElementById('rd-rate-value');
+  const statusEl    = document.getElementById('rd-rate-status');
+  const perInstWrap = document.getElementById('rd-per-install-wrap');
+  const perInstEl   = document.getElementById('rd-per-install-value');
+
+  if (!pType || totalDue <= 0 || promised <= 0) {
+    if (wrap) wrap.style.display = 'none';
+    return;
+  }
+
+  wrap.style.display = '';
+  const rate   = ((totalDue - promised) / totalDue) * 100;
+  const maxPct = _rdMaxPct(pType, M, inst);
+
+  rateEl.textContent = rate.toFixed(2) + '%';
+
+  // ยอดชำระต่องวด
+  if (inst > 1 && promised > 0) {
+    perInstWrap.style.display = '';
+    perInstEl.textContent = fmt(promised / inst);
+  } else {
+    perInstWrap.style.display = 'none';
+  }
+
+  if (maxPct == null) {
+    rateEl.style.color    = '#757575';
+    statusEl.textContent  = '(ไม่มีเกณฑ์เปรียบเทียบ — M < 7)';
+    statusEl.style.color  = '#757575';
+  } else if (rate > maxPct) {
+    rateEl.style.color    = '#b71c1c';
+    statusEl.innerHTML    = `⚠️ <strong>เกินเงื่อนไข</strong> — ส่วนลดสูงสุดที่ได้รับคือ ${maxPct}%`;
+    statusEl.style.color  = '#b71c1c';
+  } else {
+    rateEl.style.color    = '#2e7d32';
+    statusEl.innerHTML    = `✅ อยู่ในเงื่อนไข — ส่วนลดสูงสุด ${maxPct}%`;
+    statusEl.style.color  = '#2e7d32';
+  }
+}
+
+// helper: หา maxPct จาก discount tiers
+// inst = จำนวนงวด (1 = ใช้เกณฑ์เดิม, 2-3 = ใช้เกณฑ์ผ่อนชำระ)
+function _rdMaxPct(productType, M, inst) {
+  if (M < 7) return null; // ต่ำกว่า M7 ไม่มีเกณฑ์
+
+  // เกณฑ์สำหรับ 2-3 งวด (ทุก product type)
+  if (inst >= 2) {
+    const TIERS_MULTI = [
+      { minM:  7, maxM: 12, maxPct: 35 },
+      { minM: 13, maxM: 18, maxPct: 45 },
+      { minM: 19, maxM: 24, maxPct: 50 },
+      { minM: 25, maxM: 36, maxPct: 50 },
+      { minM: 37, maxM: 9999, maxPct: 55 },
+    ];
+    const tier = TIERS_MULTI.find(t => t.minM <= M && M <= t.maxM);
+    return tier ? tier.maxPct : null;
+  }
+
+  // เกณฑ์สำหรับ 1 งวด — ใช้ config DISCOUNT_TIERS_SPL_PCL / DISCOUNT_TIERS_SCL
+  if (typeof DISCOUNT_TIERS_SPL_PCL === 'undefined') return null;
+  const SCL_TYPES = ['SCL', 'SCL Nano', 'SCL P-loan'];
+  const tiers = SCL_TYPES.includes(productType) ? DISCOUNT_TIERS_SCL : DISCOUNT_TIERS_SPL_PCL;
+  const tier  = (tiers || []).find(t => t.minM <= M && M <= t.maxM);
+  return tier ? tier.maxPct : null;
+}
+
+// helper: เพิ่มเดือน (returns yyyy-mm-dd)
+function addOneMonth(dateStr, months) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '';
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
+// helper: อัปเดต UI รายละเอียดงวด 2-3
+// resetDates=true → reset default dates จาก appt-date (เรียกเมื่อ installments หรือ appt-date เปลี่ยน)
+// resetDates=false → อัปเดตแค่ยอด (เรียกเมื่อ inst1-amount หรือ promised เปลี่ยน)
+function _rdUpdateInstallments(resetDates) {
+  const inst     = parseInt(document.getElementById('rd-installments')?.value) || 1;
+  const promised = parseFloat(document.getElementById('rd-promised')?.value)   || 0;
+  const inst1    = parseFloat(document.getElementById('rd-inst1-amount')?.value) || 0;
+  const apptDate = document.getElementById('rd-appt-date')?.value || '';
+
+  const inst1Wrap = document.getElementById('rd-inst1-wrap');
+  const instTable = document.getElementById('rd-installment-table');
+  const inst3Sec  = document.getElementById('rd-inst3-section');
+  const apptLabel = document.getElementById('rd-appt-label');
+
+  if (inst < 2) {
+    if (inst1Wrap) inst1Wrap.style.display = 'none';
+    if (instTable) instTable.style.display = 'none';
+    if (apptLabel) apptLabel.textContent   = '📅 วันที่นัดชำระ';
+    return;
+  }
+
+  if (inst1Wrap) inst1Wrap.style.display = '';
+  if (instTable) instTable.style.display = '';
+  if (apptLabel) apptLabel.textContent   = '📅 วันที่นัดชำระ งวดที่ 1';
+
+  const remaining = Math.max(0, promised - inst1);
+
+  if (inst === 2) {
+    if (inst3Sec) inst3Sec.style.display = 'none';
+    const el2 = document.getElementById('rd-inst2-amount');
+    if (el2) el2.textContent = remaining > 0 ? fmt(remaining) : '—';
+  } else { // inst === 3
+    if (inst3Sec) inst3Sec.style.display = '';
+    const half = remaining / 2;
+    const el2  = document.getElementById('rd-inst2-amount');
+    const el3  = document.getElementById('rd-inst3-amount');
+    if (el2) el2.textContent = remaining > 0 ? fmt(half) : '—';
+    if (el3) el3.textContent = remaining > 0 ? fmt(half) : '—';
+  }
+
+  if (resetDates) {
+    const d2 = document.getElementById('rd-inst2-date');
+    const d3 = document.getElementById('rd-inst3-date');
+    if (d2) d2.value = addOneMonth(apptDate, 1);
+    if (d3) d3.value = addOneMonth(apptDate, 2);
+  }
+}
+
+async function saveRequestDiscountRecord() {
+  const btn     = document.getElementById('rd-submit-btn');
+  const errorEl = document.getElementById('rd-error');
+  errorEl.style.display = 'none';
+
+  const productSel  = document.getElementById('rd-product');
+  const product     = productSel.value.trim();
+  const opt         = productSel.options[productSel.selectedIndex];
+  const totalDue    = parseFloat(opt?.dataset?.total)  || 0;
+  const M           = parseInt(opt?.dataset?.m)         || 0;
+  const pType       = opt?.dataset?.type || product;
+  const dueDateFull = opt?.dataset?.due  || '';
+  const promised    = parseFloat(document.getElementById('rd-promised').value) || 0;
+  const installments = document.getElementById('rd-installments').value;
+  const instCount   = parseInt(installments) || 1;
+  const apptDate    = document.getElementById('rd-appt-date').value;
+  const sme         = document.getElementById('rd-sme')?.value || 'ไม่มี';
+  const remark      = document.getElementById('rd-remark')?.value.trim() || '';
+
+  // installment breakdown
+  const inst1Amt  = instCount >= 2 ? (parseFloat(document.getElementById('rd-inst1-amount')?.value) || 0) : promised;
+  const remaining = Math.max(0, promised - inst1Amt);
+  const inst2Amt  = instCount >= 2 ? (instCount === 3 ? remaining / 2 : remaining) : 0;
+  const inst3Amt  = instCount === 3 ? remaining / 2 : 0;
+  const inst2Date = instCount >= 2 ? (document.getElementById('rd-inst2-date')?.value || '') : '';
+  const inst3Date = instCount === 3 ? (document.getElementById('rd-inst3-date')?.value || '') : '';
+
+  const missing = [];
+  if (!product)                         missing.push('Product');
+  if (!promised)                        missing.push('ยอดที่นัดชำระ');
+  if (!apptDate)                        missing.push('วันที่นัดชำระ');
+  if (instCount >= 2 && !inst1Amt)      missing.push('ยอดชำระงวดแรก');
+  if (missing.length) {
+    errorEl.textContent = 'กรุณากรอก: ' + missing.join(', ');
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  if (typeof REQUEST_DISCOUNT_WEB_APP_URL === 'undefined' || REQUEST_DISCOUNT_WEB_APP_URL.includes('YOUR_')) {
+    errorEl.textContent = '❌ ยังไม่ได้ตั้งค่า REQUEST_DISCOUNT_WEB_APP_URL ใน config.js';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  // decimal สำหรับ Google Sheets % format: 0.40 = 40%
+  const discountRate = totalDue > 0
+    ? parseFloat(((totalDue - promised) / totalDue).toFixed(4))
+    : 0;
+
+  // Due Date: ตัดเหลือแค่วันที่ (DD)
+  const dueDateDD = dueDateFull ? dueDateFull.slice(-2).replace(/^0/, '') : '';
+
+  btn.disabled    = true;
+  btn.textContent = '⏳ กำลังส่ง...';
+
+  const payload = {
+    type:           'REQUEST_DISCOUNT',
+    timestamp:      new Date().toISOString(),
+    agentEmail:     currentResult?.agentEmail   || '',
+    creditUserId:   currentResult?.creditUserId || '',
+    name:           currentResult?.name         || '',
+    dueDate:        dueDateDD,
+    caseId:         currentResult?.caseId       || '',
+    product,
+    totalDue,
+    promisedAmount: promised,
+    discountRate,
+    installments,
+    inst1Amount: inst1Amt,
+    inst1Date:   apptDate,
+    inst2Amount: instCount >= 2 ? inst2Amt : '',
+    inst2Date:   inst2Date,
+    inst3Amount: instCount === 3 ? inst3Amt : '',
+    inst3Date:   inst3Date,
+    sme,
+    remark,
+  };
+
+  try {
+    const res = await sheetsFetch(REQUEST_DISCOUNT_WEB_APP_URL, payload);
+    if (res && typeof res.rowsWritten === 'number' && res.rowsWritten === 0) {
+      throw new Error('Apps Script ไม่ได้บันทึกข้อมูล (rowsWritten=0)\nกรุณา Redeploy Apps Script ใหม่');
+    }
+    btn.textContent       = '✅ ส่งแล้ว';
+    btn.style.background  = '#2e7d32';
+    btn.classList.add('saved');
+    _clearDraft('rd');
+  } catch (err) {
+    btn.disabled          = false;
+    btn.textContent       = '📋 ส่ง Request Discount';
+    btn.style.background  = '#e65100';
+    btn.classList.remove('saved');
+    errorEl.textContent   = '❌ บันทึกไม่สำเร็จ: ' + err.message;
     errorEl.style.display = 'block';
   }
 }
@@ -1271,7 +1824,7 @@ async function saveWaiveRecord() {
   };
 
   try {
-    const res = await sendToBackground({ type: 'SEND_TO_SHEETS', url: WAIVE_WEB_APP_URL, payload });
+    const res = await sheetsFetch(WAIVE_WEB_APP_URL, payload);
     if (res && typeof res.rowsWritten === 'number' && res.rowsWritten === 0) {
       throw new Error('Apps Script ไม่ได้บันทึกข้อมูล (rowsWritten=0)\nกรุณา Redeploy Apps Script ใหม่');
     }
@@ -1430,7 +1983,7 @@ async function saveRefundRecord() {
     reason,
   };
 
-  sendToBackground({ type: 'SEND_TO_SHEETS', url: REFUND_WEB_APP_URL, payload })
+  sheetsFetch(REFUND_WEB_APP_URL, payload)
     .catch(err => {
       errorEl.textContent = '⚠️ บันทึกอาจไม่สำเร็จ: ' + err.message + ' (กรุณาลองใหม่)';
       errorEl.style.display = 'block';
@@ -1439,6 +1992,579 @@ async function saveRefundRecord() {
       btn.classList.remove('saved');
       btn.disabled = false;
     });
+}
+
+// ---------------------------------------------------------------------------
+// Panel: Wrong PTP / Risk Complaint
+// ---------------------------------------------------------------------------
+function renderWrongPTPPanel(result) {
+  warmup(typeof WRONG_PTP_WEB_APP_URL !== 'undefined' ? WRONG_PTP_WEB_APP_URL : '');
+  const el     = document.getElementById('wrongptp-content');
+  const groups = result.allActiveGroups || [];
+
+  // Product options — same structure as Waive (dpd, M, totalDue, dueDate DD)
+  const productOptions = groups.length
+    ? groups.map(g => {
+        const label    = g.productLabel || g.productType;
+        const dpd      = g.maxDaysPastDue != null ? g.maxDaysPastDue : 0;
+        const M        = dpd > 0 ? Math.ceil(dpd / 30) : 0;
+        const totalDue = g.totalDue || 0;
+        const dueFull  = (g.bills || []).map(b => b.dueDate).filter(d => d).sort().reverse()[0] || '';
+        const dueDD    = dueFull ? dueFull.slice(-2).replace(/^0/, '') : '';
+        return `<option value="${esc(label)}" data-dpd="${dpd}" data-m="${M}" data-total="${totalDue}" data-due="${esc(dueDD)}">${esc(label)}</option>`;
+      }).join('')
+    : '';
+
+  const today    = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+
+  el.innerHTML = `
+    <div class="sms-field">
+      <div class="sms-label">📋 Topic</div>
+      <select id="wp-topic" class="sms-select">
+        <option value="">— เลือก Topic —</option>
+        <option value="รายงานเคสที่มีความเสี่ยงว่าลูกค้าจะร้องเรียน">รายงานเคสที่มีความเสี่ยงว่าลูกค้าจะร้องเรียน</option>
+        <option value="กรอก PTP ผิด (เกินวันนัดชำระ)">กรอก PTP ผิด (เกินวันนัดชำระ)</option>
+      </select>
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">📞 วันที่โทร</div>
+      <input type="date" id="wp-call-date" class="sms-input" value="${todayStr}">
+    </div>
+
+    <!-- fields ที่แสดงเฉพาะ topic = กรอก PTP ผิด -->
+    <div id="wp-ptp-fields" style="display:none;">
+      <div class="sms-field">
+        <div class="sms-label">🏷️ Product</div>
+        <select id="wp-product" class="sms-select">
+          <option value="" data-dpd="0" data-m="0" data-total="0" data-due="">— เลือก Product —</option>
+          ${productOptions}
+        </select>
+      </div>
+
+      <div id="wp-product-info" style="display:none;margin-bottom:6px;">
+        <div style="background:#ffebee;border-radius:6px;padding:8px 12px;font-size:0.85rem;color:#b71c1c;line-height:2;">
+          <div>💰 ยอดค้างรวม: <strong id="wp-total-display">—</strong> THB</div>
+          <div>📊 M ค้างชำระ: <strong id="wp-m-display">—</strong>&nbsp;&nbsp;|&nbsp;&nbsp;DPD: <strong id="wp-dpd-display">—</strong> วัน</div>
+        </div>
+      </div>
+
+      <div class="sms-field">
+        <div class="sms-label">💵 ยอดที่นัดชำระ (THB) <span style="color:#9e9e9e;font-size:0.8rem;">(ไม่บังคับ)</span></div>
+        <input type="number" id="wp-promised" class="sms-input" placeholder="ระบุยอดนัดชำระ" min="0" step="0.01">
+      </div>
+
+      <div class="sms-field">
+        <div class="sms-label">✅ วันที่นัดชำระที่ถูก <span style="color:#9e9e9e;font-size:0.8rem;">(ไม่บังคับ)</span></div>
+        <input type="date" id="wp-correct-date" class="sms-input">
+      </div>
+
+      <div class="sms-field">
+        <div class="sms-label">❌ วันที่นัดชำระที่ผิด <span style="color:#9e9e9e;font-size:0.8rem;">(ไม่บังคับ)</span></div>
+        <input type="date" id="wp-wrong-date" class="sms-input">
+      </div>
+
+      <div class="sms-field">
+        <div class="sms-label">🏢 มีสินเชื่อพ่วงอื่นด้วยหรือไม่</div>
+        <select id="wp-linked" class="sms-select">
+          <option value="ไม่มี" selected>ไม่มี</option>
+          <option value="SPLX">SPLX</option>
+          <option value="TL">TL</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">📝 สาเหตุ <span style="color:#9e9e9e;font-size:0.8rem;">(ไม่บังคับ)</span></div>
+      <textarea id="wp-reason" class="sms-input" rows="2" placeholder="กรอกสาเหตุ..." style="resize:vertical;min-height:50px;"></textarea>
+    </div>
+
+    <div id="wp-error" class="excl-error-msg"></div>
+    <button id="wp-submit-btn" class="sms-submit-btn" style="background:#b71c1c;">⚠️ ส่ง Wrong PTP</button>`;
+
+  // แสดง/ซ่อน PTP fields ตาม topic
+  document.getElementById('wp-topic').addEventListener('change', function() {
+    const isPTP = this.value === 'กรอก PTP ผิด (เกินวันนัดชำระ)';
+    document.getElementById('wp-ptp-fields').style.display = isPTP ? '' : 'none';
+    if (!isPTP) {
+      document.getElementById('wp-product').value        = '';
+      document.getElementById('wp-product-info').style.display = 'none';
+      document.getElementById('wp-promised').value       = '';
+      document.getElementById('wp-correct-date').value   = '';
+      document.getElementById('wp-wrong-date').value     = '';
+      document.getElementById('wp-linked').value         = 'ไม่มี';
+    }
+  });
+
+  // event: เลือก product → แสดงข้อมูล
+  document.getElementById('wp-product').addEventListener('change', function() {
+    const opt      = this.options[this.selectedIndex];
+    const totalDue = parseFloat(opt.dataset.total) || 0;
+    const dpd      = parseInt(opt.dataset.dpd)     || 0;
+    const M        = parseInt(opt.dataset.m)        || 0;
+    if (this.value) {
+      document.getElementById('wp-product-info').style.display = '';
+      document.getElementById('wp-total-display').textContent  = fmt(totalDue);
+      document.getElementById('wp-m-display').textContent      = M   ? 'M' + M  : '—';
+      document.getElementById('wp-dpd-display').textContent    = dpd ? dpd      : '—';
+    } else {
+      document.getElementById('wp-product-info').style.display = 'none';
+    }
+  });
+
+  document.getElementById('wp-submit-btn').addEventListener('click', saveWrongPTPRecord);
+
+  // draft: wire auto-save แล้ว restore
+  _wireDraft('wp', 'wrongptp-content');
+  _loadDraft('wp').then(_applyDraft);
+}
+
+async function saveWrongPTPRecord() {
+  const btn     = document.getElementById('wp-submit-btn');
+  const errorEl = document.getElementById('wp-error');
+  errorEl.style.display = 'none';
+
+  const productSel   = document.getElementById('wp-product');
+  const product      = productSel.value.trim();
+  const opt          = productSel.options[productSel.selectedIndex];
+  const totalDue     = parseFloat(opt?.dataset?.total) || 0;
+  const M            = parseInt(opt?.dataset?.m)        || 0;
+  const dueDD        = opt?.dataset?.due || '';
+  const topic        = document.getElementById('wp-topic').value;
+  const isPTP        = topic === 'กรอก PTP ผิด (เกินวันนัดชำระ)';
+  const promised     = isPTP ? (parseFloat(document.getElementById('wp-promised').value) || 0) : 0;
+  const callDate     = document.getElementById('wp-call-date').value;
+  const correctDate  = isPTP ? document.getElementById('wp-correct-date').value : '';
+  const wrongDate    = isPTP ? document.getElementById('wp-wrong-date').value   : '';
+  const linkedCredit = isPTP ? document.getElementById('wp-linked').value       : 'ไม่มี';
+  const reason       = document.getElementById('wp-reason')?.value.trim() || '';
+
+  const missing = [];
+  if (!product)                     missing.push('Product');
+  if (!topic)                       missing.push('Topic');
+  if (!callDate)                    missing.push('วันที่โทร');
+  // ยอดนัดชำระ, วันที่ถูก, วันที่ผิด — ไม่บังคับ
+
+  if (missing.length) {
+    errorEl.textContent = 'กรุณากรอก: ' + missing.join(', ');
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  if (typeof WRONG_PTP_WEB_APP_URL === 'undefined' || WRONG_PTP_WEB_APP_URL.includes('YOUR_')) {
+    errorEl.textContent = '❌ ยังไม่ได้ตั้งค่า WRONG_PTP_WEB_APP_URL ใน config.js';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = '⏳ กำลังส่ง...';
+
+  const payload = {
+    type:            'WRONG_PTP',
+    timestamp:       new Date().toISOString(),
+    agentEmail:      currentResult?.agentEmail   || '',
+    creditUserId:    currentResult?.creditUserId || '',
+    name:            currentResult?.name         || '',
+    dueDate:         dueDD,
+    caseId:          currentResult?.caseId       || '',
+    product,
+    installmentM:    M,
+    totalDue,
+    topic,
+    promisedAmount:  promised,
+    callDate,
+    correctApptDate: correctDate,
+    wrongApptDate:   wrongDate,
+    linkedCredit,
+    reason,
+  };
+
+  try {
+    const res = await sheetsFetch(WRONG_PTP_WEB_APP_URL, payload);
+    if (res && typeof res.rowsWritten === 'number' && res.rowsWritten === 0) {
+      throw new Error('Apps Script ไม่ได้บันทึกข้อมูล (rowsWritten=0)\nกรุณา Redeploy Apps Script ใหม่');
+    }
+    btn.textContent      = '✅ ส่งแล้ว';
+    btn.style.background = '#2e7d32';
+    btn.classList.add('saved');
+    _clearDraft('wp');
+  } catch (err) {
+    btn.disabled         = false;
+    btn.textContent      = '⚠️ ส่ง Wrong PTP';
+    btn.style.background = '#b71c1c';
+    btn.classList.remove('saved');
+    errorEl.textContent  = '❌ บันทึกไม่สำเร็จ: ' + err.message;
+    errorEl.style.display = 'block';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Panel: Inbound Record
+// ---------------------------------------------------------------------------
+function renderInboundPanel(result) {
+  warmup(typeof INBOUND_WEB_APP_URL !== 'undefined' ? INBOUND_WEB_APP_URL : '');
+  const el     = document.getElementById('inbound-content');
+  const groups = result.allActiveGroups || [];
+
+  // รวม products และ M ทั้งหมดจาก case (comma-separated)
+  const allProducts     = groups.map(g => g.productLabel || g.productType).join(', ');
+  const allInstallments = groups.map(g => {
+    const dpd = g.maxDaysPastDue != null ? g.maxDaysPastDue : 0;
+    const M   = dpd > 0 ? Math.ceil(dpd / 30) : 0;
+    return M ? 'M' + M : 'M0';
+  }).join(', ');
+
+  const productSummary = allProducts
+    ? `<div style="background:#e0f2f1;border-radius:6px;padding:8px 12px;font-size:0.85rem;color:#004d40;line-height:1.8;margin-bottom:8px;">
+        <div>🏷️ Product: <strong>${esc(allProducts)}</strong></div>
+        <div>📊 M ค้างชำระ: <strong>${esc(allInstallments)}</strong></div>
+       </div>`
+    : `<div style="background:#f5f5f5;border-radius:6px;padding:8px 12px;font-size:0.85rem;color:#9e9e9e;margin-bottom:8px;">ไม่พบข้อมูล Product</div>`;
+
+  el.innerHTML = `
+    <div class="sms-field">
+      <div class="sms-label">👤 สถานะลูกค้า</div>
+      <select id="ib-customer-status" class="sms-select">
+        <option value="Overdue">Overdue</option>
+        <option value="Non Overdue">Non Overdue</option>
+      </select>
+    </div>
+
+    ${productSummary}
+
+    <div class="sms-field">
+      <div class="sms-label">📋 Topic</div>
+      <select id="ib-topic" class="sms-select">
+        <option value="">— เลือก Topic —</option>
+        <option value="งาน OA">งาน OA</option>
+        <option value="ลูกค้าขอทำ RL">ลูกค้าขอทำ RL</option>
+        <option value="PTP">PTP</option>
+        <option value="RTP">RTP</option>
+        <option value="Completed">Completed</option>
+        <option value="งานฟ้อง">งานฟ้อง</option>
+        <option value="สอบถามเอกสารปิดบัญชี">สอบถามเอกสารปิดบัญชี</option>
+        <option value="สอบถามรายละเอียดการใช้งาน">สอบถามรายละเอียดการใช้งาน</option>
+        <option value="ร้องเรียน">ร้องเรียน</option>
+        <option value="__other__">อื่นๆ (ระบุเพิ่มเติม)</option>
+      </select>
+    </div>
+
+    <div class="sms-field" id="ib-topic-other-wrap" style="display:none;">
+      <div class="sms-label">✏️ ระบุ Topic เพิ่มเติม</div>
+      <input type="text" id="ib-topic-other" class="sms-input" placeholder="กรอก Topic...">
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">📞 เบอร์โทรที่โทรเข้ามา</div>
+      <input type="tel" id="ib-caller-phone" class="sms-input" placeholder="0812345678">
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">📱 เบอร์ลงทะเบียน</div>
+      <input type="tel" id="ib-reg-phone" class="sms-input" placeholder="0812345678">
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">📌 Case Status</div>
+      <select id="ib-case-status" class="sms-select">
+        <option value="Solved" selected>Solved</option>
+        <option value="Escalated to CS">Escalated to CS</option>
+        <option value="Escalated to OA">Escalated to OA</option>
+        <option value="Escalated to C-care">Escalated to C-care</option>
+        <option value="Escalated to senior">Escalated to senior</option>
+        <option value="Pending case">Pending case</option>
+      </select>
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">🔄 ต้องการให้ติดต่อกลับหรือไม่</div>
+      <select id="ib-callback-want" class="sms-select">
+        <option value="ไม่ต้องการให้ติดต่อกลับ" selected>ไม่ต้องการให้ติดต่อกลับ</option>
+        <option value="ต้องการให้ติดต่อกลับ">ต้องการให้ติดต่อกลับ</option>
+      </select>
+    </div>
+
+    <div class="sms-field" id="ib-callback-phone-wrap" style="display:none;">
+      <div class="sms-label">📞 เบอร์ติดต่อกลับ <span style="color:#9e9e9e;font-size:0.8rem;">(ไม่บังคับ)</span></div>
+      <input type="tel" id="ib-callback-phone" class="sms-input" placeholder="0812345678">
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">📝 Remark</div>
+      <textarea id="ib-remark" class="sms-input" rows="2" placeholder="หมายเหตุ..." style="resize:vertical;min-height:50px;"></textarea>
+    </div>
+
+    <div id="ib-error" class="excl-error-msg"></div>
+    <button id="ib-submit-btn" class="sms-submit-btn" style="background:#004d40;">📥 ส่ง Inbound Record</button>`;
+
+  // แสดง/ซ่อน เบอร์ติดต่อกลับ
+  document.getElementById('ib-callback-want').addEventListener('change', function() {
+    document.getElementById('ib-callback-phone-wrap').style.display =
+      this.value === 'ต้องการให้ติดต่อกลับ' ? '' : 'none';
+    if (this.value !== 'ต้องการให้ติดต่อกลับ')
+      document.getElementById('ib-callback-phone').value = '';
+  });
+
+  // แสดง/ซ่อน "อื่นๆ" text input
+  document.getElementById('ib-topic').addEventListener('change', function() {
+    document.getElementById('ib-topic-other-wrap').style.display =
+      this.value === '__other__' ? '' : 'none';
+    if (this.value !== '__other__') document.getElementById('ib-topic-other').value = '';
+  });
+
+  document.getElementById('ib-submit-btn').addEventListener('click', saveInboundRecord);
+
+  // เก็บข้อมูล products/installments ไว้ใน dataset สำหรับ save
+  el.dataset.products     = allProducts;
+  el.dataset.installments = allInstallments;
+
+  // draft: wire auto-save แล้ว restore
+  _wireDraft('ib', 'inbound-content');
+  _loadDraft('ib').then(_applyDraft);
+}
+
+async function saveInboundRecord() {
+  const btn     = document.getElementById('ib-submit-btn');
+  const errorEl = document.getElementById('ib-error');
+  errorEl.style.display = 'none';
+
+  const customerStatus = document.getElementById('ib-customer-status')?.value || '';
+  const caseStatus     = document.getElementById('ib-case-status')?.value     || 'Solved case';
+  const callbackWant   = document.getElementById('ib-callback-want')?.value   || 'ไม่ต้องการให้ติดต่อกลับ';
+  const callbackPhone  = document.getElementById('ib-callback-phone')?.value.trim() || '';
+  const topicRaw   = document.getElementById('ib-topic').value;
+  const topicOther = document.getElementById('ib-topic-other').value.trim();
+  const topic      = topicRaw === '__other__' ? ('อื่นๆ: ' + topicOther) : topicRaw;
+  const callerPhone = document.getElementById('ib-caller-phone').value.trim();
+  const regPhone    = document.getElementById('ib-reg-phone').value.trim();
+  const remark     = document.getElementById('ib-remark').value.trim();
+  const el         = document.getElementById('inbound-content');
+  const products     = el.dataset.products     || '';
+  const installments = el.dataset.installments || '';
+
+  // Due Date DD จาก allActiveGroups
+  const groups  = currentResult?.allActiveGroups || [];
+  const dueFull = groups.flatMap(g => (g.bills || []).map(b => b.dueDate))
+                        .filter(d => d).sort().reverse()[0] || '';
+  const dueDD   = dueFull ? dueFull.slice(-2).replace(/^0/, '') : '';
+
+  const missing = [];
+  if (!topic)                               missing.push('Topic');
+  if (topicRaw === '__other__' && !topicOther) missing.push('ระบุ Topic เพิ่มเติม');
+
+  if (missing.length) {
+    errorEl.textContent = 'กรุณากรอก: ' + missing.join(', ');
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  if (typeof INBOUND_WEB_APP_URL === 'undefined' || INBOUND_WEB_APP_URL.includes('YOUR_')) {
+    errorEl.textContent = '❌ ยังไม่ได้ตั้งค่า INBOUND_WEB_APP_URL ใน config.js';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = '⏳ กำลังส่ง...';
+
+  const payload = {
+    type:           'INBOUND',
+    timestamp:      new Date().toISOString(),
+    agentEmail:     currentResult?.agentEmail   || '',
+    creditUserId:   currentResult?.creditUserId || '',
+    name:           currentResult?.name         || '',
+    dueDate:        dueDD,
+    caseId:         currentResult?.caseId       || '',
+    customerStatus,
+    caseStatus,
+    callbackWant,
+    callbackPhone,
+    topic,
+    products,
+    installments,
+    callerPhone,
+    regPhone,
+    remark,
+  };
+
+  try {
+    const res = await sheetsFetch(INBOUND_WEB_APP_URL, payload);
+    if (res && typeof res.rowsWritten === 'number' && res.rowsWritten === 0) {
+      throw new Error('Apps Script ไม่ได้บันทึกข้อมูล (rowsWritten=0)\nกรุณา Redeploy Apps Script ใหม่');
+    }
+    btn.textContent      = '✅ ส่งแล้ว';
+    btn.style.background = '#2e7d32';
+    btn.classList.add('saved');
+    _clearDraft('ib');
+  } catch (err) {
+    btn.disabled         = false;
+    btn.textContent      = '📥 ส่ง Inbound Record';
+    btn.style.background = '#004d40';
+    btn.classList.remove('saved');
+    errorEl.textContent  = '❌ บันทึกไม่สำเร็จ: ' + err.message;
+    errorEl.style.display = 'block';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Panel: hashtag
+// ---------------------------------------------------------------------------
+function renderHashtagPanel(result) {
+  warmup(typeof HASHTAG_WEB_APP_URL !== 'undefined' ? HASHTAG_WEB_APP_URL : '');
+  const el     = document.getElementById('hashtag-content');
+  const groups = result.allActiveGroups || [];
+
+  // Product options — same structure as Waive
+  const productOptions = groups.length
+    ? groups.map(g => {
+        const label    = g.productLabel || g.productType;
+        const dpd      = g.maxDaysPastDue != null ? g.maxDaysPastDue : 0;
+        const M        = dpd > 0 ? Math.ceil(dpd / 30) : 0;
+        const totalDue = g.totalDue || 0;
+        const dueFull  = (g.bills || []).map(b => b.dueDate).filter(d => d).sort().reverse()[0] || '';
+        const dueDD    = dueFull ? dueFull.slice(-2).replace(/^0/, '') : '';
+        return `<option value="${esc(label)}" data-dpd="${dpd}" data-m="${M}" data-total="${totalDue}" data-due="${esc(dueDD)}">${esc(label)}</option>`;
+      }).join('')
+    : '';
+
+  el.innerHTML = `
+    <div class="sms-field">
+      <div class="sms-label">🏷️ Product</div>
+      <select id="ht-product" class="sms-select">
+        <option value="" data-dpd="0" data-m="0" data-total="0" data-due="">— เลือก Product —</option>
+        ${productOptions}
+      </select>
+    </div>
+
+    <div id="ht-product-info" style="display:none;margin-bottom:6px;">
+      <div style="background:#e3f2fd;border-radius:6px;padding:8px 12px;font-size:0.85rem;color:#0d47a1;line-height:2;">
+        <div>💰 ยอดค้างรวม: <strong id="ht-total-display">—</strong> THB</div>
+        <div>📊 M ค้างชำระ: <strong id="ht-m-display">—</strong>&nbsp;&nbsp;|&nbsp;&nbsp;DPD: <strong id="ht-dpd-display">—</strong> วัน</div>
+      </div>
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">📌 สถานะนัดชำระ</div>
+      <select id="ht-ptp-status" class="sms-select">
+        <option value="">— เลือกสถานะ —</option>
+        <option value="นัดชำระ">นัดชำระ</option>
+        <option value="ไม่นัดชำระ">ไม่นัดชำระ</option>
+      </select>
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">💵 ยอดนัดชำระ (THB) <span style="color:#9e9e9e;font-size:0.8rem;">(ไม่บังคับ)</span></div>
+      <input type="number" id="ht-promised" class="sms-input" placeholder="ระบุยอด" min="0" step="0.01">
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">#️⃣ ระบุ hashtag</div>
+      <input type="text" id="ht-hashtag" class="sms-input" placeholder="#tag1 #tag2 ...">
+    </div>
+
+    <div class="sms-field">
+      <div class="sms-label">📝 Remark</div>
+      <textarea id="ht-remark" class="sms-input" rows="2" placeholder="หมายเหตุ..." style="resize:vertical;min-height:50px;"></textarea>
+    </div>
+
+    <div id="ht-error" class="excl-error-msg"></div>
+    <button id="ht-submit-btn" class="sms-submit-btn" style="background:#1565c0;">#️⃣ ส่ง hashtag</button>`;
+
+  // event: เลือก product → แสดงข้อมูล
+  document.getElementById('ht-product').addEventListener('change', function() {
+    const opt      = this.options[this.selectedIndex];
+    const totalDue = parseFloat(opt.dataset.total) || 0;
+    const dpd      = parseInt(opt.dataset.dpd)     || 0;
+    const M        = parseInt(opt.dataset.m)        || 0;
+    if (this.value) {
+      document.getElementById('ht-product-info').style.display = '';
+      document.getElementById('ht-total-display').textContent  = fmt(totalDue);
+      document.getElementById('ht-m-display').textContent      = M   ? 'M' + M  : '—';
+      document.getElementById('ht-dpd-display').textContent    = dpd ? dpd      : '—';
+    } else {
+      document.getElementById('ht-product-info').style.display = 'none';
+    }
+  });
+
+  document.getElementById('ht-submit-btn').addEventListener('click', saveHashtagRecord);
+
+  // draft: wire auto-save แล้ว restore
+  _wireDraft('ht', 'hashtag-content');
+  _loadDraft('ht').then(_applyDraft);
+}
+
+async function saveHashtagRecord() {
+  const btn     = document.getElementById('ht-submit-btn');
+  const errorEl = document.getElementById('ht-error');
+  errorEl.style.display = 'none';
+
+  const productSel = document.getElementById('ht-product');
+  const product    = productSel.value.trim();
+  const opt        = productSel.options[productSel.selectedIndex];
+  const totalDue   = parseFloat(opt?.dataset?.total) || 0;
+  const M          = parseInt(opt?.dataset?.m)        || 0;
+  const dueDD      = opt?.dataset?.due || '';
+  const ptpStatus  = document.getElementById('ht-ptp-status').value;
+  const promised   = parseFloat(document.getElementById('ht-promised').value) || 0;
+  const hashtag    = document.getElementById('ht-hashtag').value.trim();
+  const remark     = document.getElementById('ht-remark').value.trim();
+
+  const missing = [];
+  if (!product)   missing.push('Product');
+  if (!ptpStatus) missing.push('สถานะนัดชำระ');
+  if (!hashtag)   missing.push('ระบุ hashtag');
+
+  if (missing.length) {
+    errorEl.textContent = 'กรุณากรอก: ' + missing.join(', ');
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  if (typeof HASHTAG_WEB_APP_URL === 'undefined' || HASHTAG_WEB_APP_URL.includes('YOUR_')) {
+    errorEl.textContent = '❌ ยังไม่ได้ตั้งค่า HASHTAG_WEB_APP_URL ใน config.js';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = '⏳ กำลังส่ง...';
+
+  const payload = {
+    type:           'HASHTAG',
+    timestamp:      new Date().toISOString(),
+    agentEmail:     currentResult?.agentEmail   || '',
+    creditUserId:   currentResult?.creditUserId || '',
+    name:           currentResult?.name         || '',
+    dueDate:        dueDD,
+    caseId:         currentResult?.caseId       || '',
+    product,
+    installmentM:   M,
+    totalDue,
+    ptpStatus,
+    promisedAmount: promised || '',
+    hashtag,
+    remark,
+  };
+
+  try {
+    const res = await sheetsFetch(HASHTAG_WEB_APP_URL, payload);
+    if (res && typeof res.rowsWritten === 'number' && res.rowsWritten === 0) {
+      throw new Error('Apps Script ไม่ได้บันทึกข้อมูล (rowsWritten=0)\nกรุณา Redeploy Apps Script ใหม่');
+    }
+    btn.textContent      = '✅ ส่งแล้ว';
+    btn.style.background = '#2e7d32';
+    btn.classList.add('saved');
+    _clearDraft('ht');
+  } catch (err) {
+    btn.disabled         = false;
+    btn.textContent      = '#️⃣ ส่ง hashtag';
+    btn.style.background = '#1565c0';
+    btn.classList.remove('saved');
+    errorEl.textContent  = '❌ บันทึกไม่สำเร็จ: ' + err.message;
+    errorEl.style.display = 'block';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1492,6 +2618,24 @@ function sendToBackground(message) {
       }
     });
   });
+}
+
+// fetch Apps Script ตรงจาก popup (ไม่ผ่าน service worker — เร็วกว่า)
+// manifest มี host_permissions: script.google.com + script.googleusercontent.com
+async function sheetsFetch(url, payload) {
+  if (!url || url.includes('YOUR_')) {
+    throw new Error('Web App URL ยังไม่ได้ตั้งค่าใน config.js');
+  }
+  const resp = await fetch(url, {
+    method:   'POST',
+    redirect: 'follow',
+    headers:  { 'Content-Type': 'text/plain' }, // text/plain หลีกเลี่ยง preflight CORS
+    body:     JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status + ' จาก Apps Script');
+  const json = await resp.json();
+  if (json.status === 'error') throw new Error(json.message || 'Apps Script error');
+  return json;
 }
 
 function isCaseDetailPage(url) {
@@ -1600,6 +2744,19 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+// Auto-format date input เป็น yyyy-mm-dd ขณะพิมพ์
+function formatDateInput(el) {
+  const pos  = el.selectionStart;
+  let   v    = el.value.replace(/\D/g, '').slice(0, 8);
+  let   out  = v;
+  if (v.length > 4) out = v.slice(0, 4) + '-' + v.slice(4);
+  if (v.length > 6) out = v.slice(0, 4) + '-' + v.slice(4, 6) + '-' + v.slice(6);
+  el.value = out;
+  // คงตำแหน่ง cursor
+  const added = out.length - el.value.replace(/\D/g, '').length;
+  try { el.setSelectionRange(pos + (out.length > pos ? 0 : 0), pos + (out.length > pos ? 0 : 0)); } catch(_) {}
+}
+
 function zoneLabel(zone) {
   return { green: 'Green Zone', yellow: 'Yellow Zone', red: 'Red Zone' }[zone] || zone;
 }
@@ -1656,70 +2813,12 @@ async function renderAdminPanel(role) {
       <button class="add-user-submit" id="btn-add-user">เพิ่มผู้ใช้</button>
     </div>`;
 
-  // ── user list placeholder ────────────────────────────────────────────────
-  html += `<div class="admin-section-lbl">รายชื่อผู้ใช้ทั้งหมด</div>
-           <div id="user-list-wrap"><div class="no-data">กำลังโหลด…</div></div>`;
-
   container.innerHTML = html;
 
   // wire add-user button
   document.getElementById('btn-add-user').addEventListener('click', () => saveAddUser(loginUrl, role));
-
-  // load user list
-  await loadUserList(loginUrl, role);
 }
 
-// ---------------------------------------------------------------------------
-// Load user list from Apps Script
-// ---------------------------------------------------------------------------
-async function loadUserList(loginUrl, role) {
-  const wrap = document.getElementById('user-list-wrap');
-  if (!wrap) return;
-
-  let users;
-  try {
-    users = await sendToBackground({ type: 'ADMIN_OP', url: loginUrl, payload: { type: 'LIST_USERS', requestedBy: verifiedEmail } });
-  } catch (err) {
-    wrap.innerHTML = `<div class="no-data" style="color:#b71c1c">โหลดรายชื่อไม่สำเร็จ: ${esc(err.message)}</div>`;
-    return;
-  }
-
-  if (!Array.isArray(users) || users.length === 0) {
-    wrap.innerHTML = '<div class="no-data">ไม่มีรายชื่อในระบบ</div>';
-    return;
-  }
-
-  // sort: owner first, then admin, then agent; inactive last
-  const roleOrder = { owner: 0, admin: 1, agent: 2 };
-  users.sort((a, b) => {
-    if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
-    return (roleOrder[a.role] ?? 9) - (roleOrder[b.role] ?? 9);
-  });
-
-  wrap.innerHTML = users.map(u => buildUserCard(u, role)).join('');
-
-  // wire per-card buttons/selects
-  users.forEach(u => {
-    const card = wrap.querySelector(`[data-uid="${CSS.escape(u.email)}"]`);
-    if (!card) return;
-
-    // toggle active/inactive
-    const toggleBtn = card.querySelector('.user-btn');
-    if (toggleBtn) {
-      toggleBtn.addEventListener('click', () => saveUpdateUser(loginUrl, role, u.email, {
-        status: u.status === 'active' ? 'inactive' : 'active',
-      }, toggleBtn));
-    }
-
-    // role change select (owner only)
-    const roleSel = card.querySelector('.role-change-sel');
-    if (roleSel) {
-      roleSel.addEventListener('change', () => saveUpdateUser(loginUrl, role, u.email, {
-        role: roleSel.value,
-      }, roleSel));
-    }
-  });
-}
 
 function buildUserCard(u, viewerRole) {
   const isActive  = u.status === 'active';

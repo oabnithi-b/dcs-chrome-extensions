@@ -11,23 +11,12 @@
 //   - LOGOUT handler: revoke token + clear session + close session log
 // =============================================================================
 
-const SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 นาที
-
 // =============================================================================
-// Alarm — ping ทุก 1 นาทีเพื่ออัปเดต dc_last_ping
+// Alarm — daily reset เท่านั้น (ลบ ping timeout ออกแล้ว)
 // =============================================================================
 
-chrome.runtime.onInstalled.addListener(() => { setupPingAlarm(); scheduleDailyReset(); });
-chrome.runtime.onStartup.addListener(()   => { setupPingAlarm(); scheduleDailyReset(); });
-
-function setupPingAlarm() {
-  chrome.alarms.get('dc_session_ping', existing => {
-    if (!existing) {
-      chrome.alarms.create('dc_session_ping', { periodInMinutes: 1 });
-      console.log('[DC] Ping alarm created');
-    }
-  });
-}
+chrome.runtime.onInstalled.addListener(() => { scheduleDailyReset(); });
+chrome.runtime.onStartup.addListener(()   => { scheduleDailyReset(); })
 
 // ── Daily reset alarm — logout อัตโนมัติทุกวันตอน 23:59 (UTC+7) ──────────────
 function scheduleDailyReset() {
@@ -56,9 +45,6 @@ function getNext2359UTC7() {
 }
 
 chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === 'dc_session_ping') {
-    chrome.storage.local.set({ dc_last_ping: Date.now() });
-  }
   if (alarm.name === 'dc_daily_reset') {
     // Auto-logout ตอน 23:59 — mark dc_daily loggedOut เพื่อให้วันใหม่ขึ้นเป็น first_today
     chrome.storage.local.get(['dc_session', 'dc_daily'], async store => {
@@ -81,9 +67,10 @@ chrome.alarms.onAlarm.addListener(alarm => {
           }).catch(() => {});
         }
       }
-      await chrome.storage.local.set({ dc_daily: { ...daily2, loggedOut: true } });
-      await chrome.storage.local.remove(['dc_session']);
-      console.log('[DC] Daily reset: session cleared at 23:59');
+      // ไม่ลบ dc_session — แค่ mark ว่าต้องทำ CHECK_ACCESS ใหม่วันถัดไป
+      // popup จะส่ง first_today login log โดยไม่บล็อก UI
+      await chrome.storage.local.set({ dc_daily: { ...daily2, date: '', loggedOut: false } });
+      console.log('[DC] Daily reset: dc_daily date cleared at 23:59 (session kept)');
     });
   }
 });
@@ -139,46 +126,33 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 // =============================================================================
 
 async function checkAuth(loginUrl, interactive = true) {
-  const store    = await chrome.storage.local.get(['dc_session', 'dc_daily', 'dc_last_ping']);
-  const session  = store.dc_session  || {};
-  let   daily    = store.dc_daily    || {};   // let เพื่อ reset เมื่อ timeout
-  const lastPing = store.dc_last_ping || 0;
-  const now      = Date.now();
+  const store   = await chrome.storage.local.get(['dc_session', 'dc_daily']);
+  const session = store.dc_session || {};
+  const daily   = store.dc_daily   || {};
+  const now     = Date.now();
 
-  const timedOut = lastPing > 0 && (now - lastPing) > SESSION_TIMEOUT_MS;
-  if (timedOut) {
-    const gapMin = Math.round((now - lastPing) / 60000);
-    console.log('[DC] Session timed out (' + gapMin + ' min) — revoking token');
-
-    if (session.sessionId && loginUrl && !loginUrl.includes('YOUR_')) {
-      try {
-        await postScript(loginUrl, {
-          type:       'CLOSE_SESSION',
-          sessionId:  session.sessionId,
-          email:      session.email || '',
-          logoutTime: new Date().toISOString(),
-          reason:     'timeout_15min',
-        });
-      } catch (_) {}
-    }
-
-    // mark loggedOut ใน dc_daily แต่เก็บ date ไว้ เพื่อแยก after_logout จาก first_today
-    await chrome.storage.local.set({ dc_daily: { ...daily, loggedOut: true } });
-    await chrome.storage.local.remove(['dc_session']);
-    daily = { ...daily, loggedOut: true };
-    await revokeGoogleToken();
-  }
-
-  // ── Fast path: session_resume — ใช้ cache ทันที ไม่ยิง Apps Script ──────────
-  if (!timedOut && session.email && session.role) {
+  // ── Fast path: session_resume — ใช้ cache ทันที ────────────────────────────
+  // session ถูกต้องตราบใดที่มี email+role (daily reset ไม่ลบ session แล้ว)
+  // logout เท่านั้นที่ลบ dc_session
+  if (session.email && session.role) {
     const today2 = new Date().toISOString().slice(0, 10);
-    const sameDay = daily.email === session.email && daily.date === today2;
-    if (sameDay) {
-      // อัปเดต last ping แล้ว return ทันที
-      await chrome.storage.local.set({ dc_last_ping: now });
-      console.log('[DC] Fast resume:', session.email, '|', session.role);
-      return { email: session.email, role: session.role };
+    if (daily.date !== today2 && loginUrl && !loginUrl.includes('YOUR_')) {
+      // วันใหม่: ส่ง first_today log แบบ fire-and-forget ไม่บล็อก popup
+      const sessionId2 = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      postScript(loginUrl, {
+        type:              'CHECK_ACCESS',
+        email:             session.email,
+        isFirstLoginToday: true,
+        loginType:         'first_today',
+        sessionId:         sessionId2,
+        ip:                '',
+        timestamp:         new Date().toISOString(),
+      }).then(() => {
+        chrome.storage.local.set({ dc_daily: { email: session.email, date: today2 } });
+      }).catch(() => {});
     }
+    console.log('[DC] Fast resume:', session.email, '|', session.role);
+    return { email: session.email, role: session.role };
   }
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -233,8 +207,7 @@ async function checkAuth(loginUrl, interactive = true) {
   await chrome.storage.local.set({
     dc_session:   { email, role, startedAt: now, sessionId },
     dc_daily:     isFirstToday ? { email, date: today } : daily,
-    dc_last_ping: now,
-    dc_login_url: loginUrl || '',  // เก็บไว้ให้ daily reset alarm ใช้
+    dc_login_url: loginUrl || '',
   });
 
   return { email, role };

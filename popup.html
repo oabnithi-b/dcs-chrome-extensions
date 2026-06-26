@@ -10,7 +10,7 @@
 
     body {
       width: 100%;
-      min-width: 360px;
+      min-width: 450px;
       overflow-x: hidden;
       overflow-y: auto;
       font-family: 'Segoe UI', Tahoma, sans-serif;
@@ -942,7 +942,7 @@
     </div>
     <button id="btn-open-overlay" title="เปิด D Tool บนหน้าเว็บ">📌 D Tool</button>
     <button id="btn-logout" title="ออกจากระบบ" style="display:none;background:rgba(255,255,255,0.12);border:none;cursor:pointer;color:rgba(255,255,255,0.75);font-size:12px;padding:2px 7px;border-radius:4px;line-height:1.4;white-space:nowrap;transition:background 0.12s,color 0.12s;">🚪 ออกจากระบบ</button>
-    <span class="header-phase">Phase 2</span>
+    <span class="header-phase">v2.1</span>
   </div>
 </div>
 
@@ -950,6 +950,7 @@
 <div class="tool-tabs">
   <button class="tool-tab active" data-tool="partial">🧮 Partial</button>
   <button class="tool-tab"        data-tool="discount">💸 Discount</button>
+  <button class="tool-tab"        data-tool="rdiscount">📋 Req.Disc</button>
   <button class="tool-tab"        data-tool="interest">📊 ดอกเบี้ย</button>
   <button class="tool-tab"        data-tool="rl">🔄 RL</button>
   <div style="width:100%;height:0;margin:0;padding:0;"></div>
@@ -957,8 +958,11 @@
   <button class="tool-tab"        data-tool="waive">💳 Waive</button>
   <button class="tool-tab"        data-tool="refund">💰 Refund</button>
   <button class="tool-tab"        data-tool="sms">💬 SMS</button>
-  <div style="width:100%;height:0;margin:0;padding:0;"></div>
   <button class="tool-tab"        data-tool="phone">📞 ดึงเบอร์</button>
+  <div style="width:100%;height:0;margin:0;padding:0;"></div>
+  <button class="tool-tab"        data-tool="wrongptp">⚠️ Wrong PTP</button>
+  <button class="tool-tab"        data-tool="hashtag">#️⃣ hashtag</button>
+  <button class="tool-tab"        data-tool="inbound">📥 Inbound</button>
   <button class="tool-tab" data-tool="admin" id="tab-admin" style="display:none">⚙️ จัดการ</button>
 </div>
 
@@ -1069,6 +1073,30 @@
   <div id="panel-refund" class="tool-panel">
     <div class="section-label" style="background:#e0f2f1;color:#004d40;border-left:4px solid #00897b;">💰 Refund Request</div>
     <div id="refund-content" style="padding:10px 12px;"></div>
+  </div>
+
+  <!-- ── TOOL PANEL: Request Discount ── -->
+  <div id="panel-rdiscount" class="tool-panel">
+    <div class="section-label" style="background:#fff3e0;color:#e65100;border-left:4px solid #e65100;">📋 Request Discount</div>
+    <div id="rdiscount-content" style="padding:10px 12px;"></div>
+  </div>
+
+  <!-- ── TOOL PANEL: Inbound Record ── -->
+  <div id="panel-inbound" class="tool-panel">
+    <div class="section-label" style="background:#e0f2f1;color:#004d40;border-left:4px solid #004d40;">📥 Inbound Record</div>
+    <div id="inbound-content" style="padding:10px 12px;"></div>
+  </div>
+
+  <!-- ── TOOL PANEL: hashtag ── -->
+  <div id="panel-hashtag" class="tool-panel">
+    <div class="section-label" style="background:#e3f2fd;color:#0d47a1;border-left:4px solid #1565c0;">#️⃣ hashtag</div>
+    <div id="hashtag-content" style="padding:10px 12px;"></div>
+  </div>
+
+  <!-- ── TOOL PANEL: Wrong PTP ── -->
+  <div id="panel-wrongptp" class="tool-panel">
+    <div class="section-label" style="background:#fbe9e7;color:#b71c1c;border-left:4px solid #b71c1c;">⚠️ Wrong PTP / Risk Complaint</div>
+    <div id="wrongptp-content" style="padding:10px 12px;"></div>
   </div>
 
   <!-- ── TOOL PANEL: Admin ── -->

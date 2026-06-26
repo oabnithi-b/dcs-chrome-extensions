@@ -1,0 +1,19 @@
+# Internal configuration — contains Google Apps Script endpoint URLs
+config.js
+
+# Google Apps Script source files — internal backend logic
+Code.gs
+HashtagCode.gs
+InboundCode.gs
+LoginCode.gs
+RefundCode.gs
+RequestDiscountCode.gs
+SmsCode.gs
+WaiveCode.gs
+WrongPTPCode.gs
+
+# Internal documents
+DC_Survey.docx
+Phase2_Setup_Guide.docx
+Partial Payment Calculator.xlsx
+HANDOFF.md
